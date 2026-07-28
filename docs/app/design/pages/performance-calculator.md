@@ -1,0 +1,723 @@
+# Performance Calculator Page Spec
+
+> Source-link rule: the model summary's `模型参数来源` link opens the selected
+> model's official `config.json` through `parameterSourceUrl`. The `Weight
+> memory` row displays a separate `权重文件出处` link read from
+> `weightSourceUrl`, rather than hardcoding either URL in a UI component.
+> The same source link is rendered by both the calculator trace card and the
+> Formula Notes page's `FormulaTracePreview`; these are separate render paths.
+
+## 1. 页面目的
+
+`Performance Calculator` 是应用的主工作台页面，用于在给定模型、平台参数和 token 输入条件下，计算并展示：
+
+- `TTFT`
+- `Prefill TPS`
+- `Decode TPS`
+- `Total Runtime Memory`
+- `Bottleneck Classification`
+- `Formula Trace`
+- `Token Sweep Trend`
+
+页面面向内部研发和性能分析人员，优先保证高密度、可追溯和工程可解释性。
+
+## 2. 页面范围
+
+本页负责：
+
+- 模型选择
+- 平台参数输入
+- token 输入与范围输入
+- 单点性能计算
+- token 趋势图计算与展示
+- 显存估算摘要展示
+- 结构摘要跳转
+- 公式说明跳转
+
+本页不负责：
+
+- 完整结构详情展示
+- 完整公式文档浏览
+- 多模型并排对比
+- 历史记录存档
+
+## 3. 页面状态模型
+
+页面共享一份工作台状态 `calculatorState`，至少包含：
+
+### 3.1 Model State
+
+```ts
+type SelectedModelState = {
+  modelFamily: "deepseek-v4";
+  modelId: "deepseek-v4-flash" | "deepseek-v4-pro";
+};
+```
+
+### 3.2 Platform Input State
+
+```ts
+type PlatformInputState = {
+  computeThroughputTflops: number | null;
+  memoryBandwidthGbps: number | null;
+  memoryCapacityGb: number | null;
+  computeEfficiency: number;
+  bandwidthEfficiency: number;
+  batchSize: number;
+  precisionAssumptions: string;
+};
+```
+
+默认值建议：
+
+- `computeThroughputTflops = 124`
+- `memoryBandwidthGbps = 273`
+- `memoryCapacityGb = 256`
+- `computeEfficiency = 0.4`
+- `bandwidthEfficiency = 0.6`
+- `batchSize = 1`
+- `precisionAssumptions = "FP8 weights + BF16 activations + FP4 experts"`
+
+### 3.3 Workload Input State
+
+```ts
+type WorkloadInputState = {
+  prefillTokenLength: number | null;
+  decodeOutputTokens: number | null;
+  tokenRangeStart: number | null;
+  tokenRangeEnd: number | null;
+  tokenRangeStep: number | null;
+  tokenSweepMode: "fixed-step";
+};
+```
+
+默认值建议：
+
+- `prefillTokenLength = 131072`
+- `decodeOutputTokens = null`，计算时回退为 `prefillTokenLength`
+- `tokenRangeStart = 4096`
+- `tokenRangeEnd = 131072`
+- `tokenRangeStep = 4096`
+- `tokenSweepMode = "fixed-step"`
+
+### 3.4 View State
+
+```ts
+type PerformancePageViewState = {
+  showIntermediateMetrics: boolean;
+  showFormulaTrace: boolean;
+  selectedTrendMetric: "prefillTps" | "decodeTps" | "ttft" | "totalRuntimeMemory";
+  showBottleneckBackground: boolean;
+  showTrendDataPoints: boolean;
+  selectedBreakdownMode: "prefill" | "decode";
+};
+```
+
+默认值建议：
+
+- `showIntermediateMetrics = true`
+- `showFormulaTrace = true`
+- `selectedTrendMetric = "prefillTps"`
+- `showBottleneckBackground = true`
+- `showTrendDataPoints = true`
+- `selectedBreakdownMode = "prefill"`
+
+### 3.5 Computation State
+
+```ts
+type CalculationStatus =
+  | "idle"
+  | "invalid"
+  | "ready"
+  | "calculating"
+  | "calculated"
+  | "error";
+```
+
+```ts
+type CalculationState = {
+  status: CalculationStatus;
+  validationErrors: Record<string, string>;
+  lastCalculatedAt: string | null;
+  results: PerformanceResultState | null;
+};
+```
+
+## 4. 结果数据契约
+
+```ts
+type PerformanceResultState = {
+  summary: {
+    ttftMs: number;
+    prefillTps: number;
+    decodeTps: number;
+    totalRuntimeMemoryGb: number;
+    prefillBottleneck: BottleneckType;
+    decodeBottleneck: BottleneckType;
+    memoryFitsCapacity: boolean | null;
+    memoryExcessGb: number | null;
+  };
+  comparison: {
+    dominantCostPrefill: string;
+    dominantCostDecode: string;
+    computeDemandPrefill: number;
+    computeDemandDecode: number;
+    memoryTrafficPrefill: number;
+    memoryTrafficDecode: number;
+    effectiveThroughputPrefill: number;
+    effectiveThroughputDecode: number;
+  };
+  breakdown: {
+    prefill: BreakdownRow[];
+    decode: BreakdownRow[];
+  };
+  intermediateMetrics: IntermediateMetric[];
+  memoryBreakdown: MemoryBreakdownRow[];
+  formulaTrace: FormulaTraceSection[];
+  tokenSweepSeries: TokenSweepSeriesPoint[];
+  structureSummary: StructureSummarySnapshot;
+};
+```
+
+```ts
+type BottleneckType = "compute-bound" | "bandwidth-bound";
+```
+
+```ts
+type BreakdownRow = {
+  module: "attention-core" | "compressor" | "indexer" | "moe" | "output-projection";
+  value: number;
+  share: number;
+  boundBy: BottleneckType;
+};
+```
+
+```ts
+type IntermediateMetric = {
+  key: string;
+  symbol: string;
+  value: number | string;
+  unit: string;
+  source: "config" | "derived" | "formula";
+};
+```
+
+```ts
+type MemoryBreakdownRow = {
+  key: "weights" | "persistentDecodeCache" | "peakTempWorkingSet" | "runtimeOverhead" | "estimatedTotal";
+  valueGb: number;
+  share: number | null;
+  note: string;
+};
+```
+
+```ts
+type FormulaTraceSection = {
+  category: "prefill" | "decode" | "memory";
+  rows: {
+    label: string;
+    expression: string;
+    evaluated: string;
+  }[];
+};
+```
+
+```ts
+type TokenSweepSeriesPoint = {
+  tokenLength: number;
+  prefillTps: number;
+  decodeTps: number;
+  ttftMs: number;
+  totalRuntimeMemoryGb: number;
+  prefillBottleneck: BottleneckType;
+  decodeBottleneck: BottleneckType;
+  intermediateSummary: {
+    prefillFlops?: number;
+    decodeCacheGb?: number;
+    kvVisibleLength?: number;
+  };
+};
+```
+
+## 5. 布局规格
+
+## 5.1 整体骨架
+
+页面采用三层结构：
+
+1. 左侧导航
+2. 顶部应用栏
+3. 主内容工作区
+
+主内容工作区采用：
+
+- `参数控制区`
+- `结果分析区`
+
+结果分析区采用全宽语义分区：
+
+1. 第一行：四张指标卡与内存拆解并排；指标区使用剩余主要宽度，内存拆解保持至少 320px
+2. 第二行：`Prefill / Decode 对比` 独占全宽
+3. 第三行：结构摘要与当前上下文摘要并排，宽度比例约为 58:42，为结构摘要中的长标签和数值预留足够空间。结构摘要沿用紧凑键值格式，显示 Decoder Layers、Hidden Size、Attention Heads、KV Heads、Experts、Active Experts / Token、MoE Intermediate Size 和 Context Limit，数值直接取自当前模型定义
+4. 第四行：Token 趋势图独占全宽
+5. 第五行：公式追溯独占全宽
+6. 第六行：中间量结果表独占全宽
+
+`公式追溯` 必须位于 `Token 趋势图` 正下方，并按 `Prefill`、`Decode`、`Memory` 小标题形成三行独立折叠区。三个折叠区首次进入均为收起状态，可分别展开；展开后该阶段的公式项按一行三列排列并顶部对齐。
+Prefill/Decode 对比表宽度不足时允许容器内部横向滚动，禁止内容越界覆盖相邻卡片。
+窄屏下第一行、摘要行和公式三列均改为单列堆叠。
+
+## 5.2 参数控制区布局
+
+参数控制区为四个卡片组。桌面默认使用两列两行，保证长字段名、模型推荐精度和说明文字具有足够宽度；窄屏改为单列。计算假设中的复选项占满卡片整行。
+
+### Card 1: 模型选择
+
+字段：
+
+- `模型家族`
+- `模型`
+
+只读摘要：
+
+- `Layers`
+- `Hidden Size`
+- `Attention Heads`
+- `Experts`
+- `Context Limit`
+
+交互：
+
+- 切换模型后，结构摘要、公式追踪和计算结果上下文都同步切换
+- 切换模型不会自动清空平台参数
+
+### Card 2: 输入长度
+
+字段：
+
+- `Prompt Token Length`
+- `Decode Output Tokens`
+
+趋势图范围：
+
+- `Token Sweep Start`
+- `Token Sweep End`
+- `Token Sweep Step`
+
+快捷按钮：
+
+- `4K`
+- `8K`
+- `32K`
+- `128K`
+- `1M`
+
+交互：
+
+- 点击快捷按钮时，应更新 `prefillTokenLength`，并使 decode 从该 prompt 的 KV cache 开始：
+  - 若当前趋势范围为空，可同步初始化 `tokenRangeEnd`
+- `Start <= End`
+- `Step > 0`
+- `Step` 不允许大于 `End - Start`，若大于则显示校验错误
+- `Decode Output Tokens` 可留空；留空时按 `Prompt Token Length` 计算
+
+### Card 3: 平台参数
+
+字段：
+
+- `Compute Throughput (TFLOPS)`
+- `Memory Bandwidth (GB/s)`
+- `HBM / VRAM Capacity (GB)`
+- `Platform Template`
+
+首版要求：
+
+- `Platform Template` 至少支持 `Custom`
+- 模板切换后会写入对应默认值，但用户仍可继续修改
+
+### Card 4: 计算假设
+
+字段：
+
+- `Batch Size`
+- `Compute Efficiency`
+- `Bandwidth Efficiency`
+- `Show Intermediate Metrics`
+- `Show Formula Trace`
+
+交互：
+
+- `Show Intermediate Metrics` 控制中间量表的展示，不影响计算
+- `Show Formula Trace` 控制公式追踪卡的展示，不影响计算
+- 当 `Total Runtime Memory > HBM / VRAM Capacity` 时，页面以红字提示内存不足，不再对 `Prefill TPS` / `Decode TPS` 施加惩罚系数
+
+### 参数区底部操作条
+
+组件：
+
+- `计算性能`
+- `重置`
+- `复制当前配置`
+- `状态提示`
+
+状态规则：
+
+- 所有必填项合法时：`ready`
+- 存在非法输入时：`invalid`
+- 点击计算后进入：`calculating`
+- 计算完成：`calculated`
+
+## 5.3 左列布局
+
+### Section A: 核心指标卡组
+
+四张卡：
+
+- `TTFT`
+- `Prefill TPS`
+- `Decode TPS`
+- `Total Runtime Memory`
+
+每张卡必须显示：
+
+- 主数值
+- 单位
+- 解释副标题
+- 绑定标签
+
+示例：
+
+- `Prefill TPS`
+  - main: `1234`
+  - unit: `tokens/s`
+  - sub: `Current platform estimate`
+  - tag: `Compute-bound`
+
+### Section B: Prefill / Decode 对比表
+
+固定行：
+
+- `Dominant Cost`
+- `Compute Demand`
+- `Memory Traffic`
+- `Effective Throughput`
+- `Latency`
+
+展示规则：
+
+- 统一左右列对比
+- 单位明确
+- 对差异大的行做视觉强调
+
+### Section C: Token 趋势图区
+
+这是页面的一等区域，默认展开。
+
+#### 顶部控制
+
+字段：
+
+- `Metric`
+  - `Prefill TPS`
+  - `Decode TPS`
+  - `TTFT`
+  - `Total Runtime Memory`
+- `Sweep Mode`
+  - 首版固定 `Fixed Step`
+- `Show Bottleneck Background`
+- `Show Data Points`
+
+#### 图表契约
+
+X 轴：
+
+- `Token Length`
+
+Y 轴：
+
+- 由 `selectedTrendMetric` 决定
+
+展示规则：
+
+- 若 `selectedTrendMetric` 为 `prefillTps`：
+  - 主曲线显示 `prefillTps`
+  - 次曲线可同时显示 `decodeTps`
+- 若 `selectedTrendMetric` 为 `decodeTps`：
+  - 主曲线显示 `decodeTps`
+  - 次曲线可同时显示 `prefillTps`
+- 若 `selectedTrendMetric` 为 `ttft` 或 `totalRuntimeMemory`：
+  - 单曲线模式
+
+Tooltip 必须显示：
+
+- `Token Length`
+- 当前曲线值
+- `Prefill Bottleneck`
+- `Decode Bottleneck`
+- 至少一个中间量摘要
+
+数据生成规则：
+
+- 使用 `[tokenRangeStart, tokenRangeEnd]` 按 `tokenRangeStep` 生成离散点
+- 每个点都调用同一套计算逻辑重新求值
+- 禁止仅通过 UI 插值生成伪数据点
+
+趋势图下方必须展示相同离散点的表格，至少包含 Token Length、Prefill TPS、Decode TPS、TTFT、Runtime Memory 和两阶段 Bottleneck。
+
+边界规则：
+
+- 若点数超过 `500`，前端应提示范围过密，并阻止直接计算
+- 若点数低于 `2`，不生成趋势图，显示校验提示
+
+### Section D: 瓶颈拆解区
+
+组件：
+
+- `Breakdown Mode Toggle`
+  - `Prefill`
+  - `Decode`
+- 堆叠条 / 条形图
+- 明细表
+
+模块固定为：
+
+- `Attention Core`
+- `Compressor`
+- `Indexer`
+- `MoE`
+- `Output Projection`
+
+### Section E: 中间量结果表
+
+默认展示，受 `Show Intermediate Metrics` 控制。
+
+列固定为：
+
+- `Metric`
+- `Symbol`
+- `Value`
+- `Unit`
+- `Source`
+
+排序规则：
+
+- 先展示 summary 直接相关项
+- 再展示 prefill
+- 再展示 decode
+- 再展示 memory
+
+## 5.4 右列布局
+
+### Section A: 模型结构摘要卡
+
+内容：
+
+- `Decoder Layers`
+- `Attention Heads`
+- `Head Dim`
+- `KV Heads`
+- `MoE Experts`
+- `Hash-MoE Layers`
+- `Compression Schedule`
+
+底部按钮：
+
+- `查看完整结构页`
+
+### Section B: 显存需求分析卡
+
+固定分段：
+
+- `Weights`
+- `Persistent Decode Cache`
+- `Peak Temp Working Set`
+- `Runtime Overhead`
+
+`Runtime Overhead` 是运行框架、CUDA 上下文、内存池、碎片和工作缓冲区等未单独建模开销的估算假设。默认值为 `4 GB`，在内存拆解中明确标注“估算假设，可手动编辑”。用户修改后，重新计算的总显存、容量判断、趋势数据、公式追溯和历史记录统一使用该输入值。
+
+模型摘要中的 `Context` 来自模型配置声明的最大上下文窗口（`max_position_embeddings` 或 `text_config.max_position_embeddings`），不得使用性能验收场景长度代替。`Prompt Token Length` 默认值 `131072`（128K）是验收计算长度，输入项下方应明确注明它不是模型最大上下文窗口。
+
+输入长度快捷值必须受当前模型 `contextLimit` 约束：超过最大上下文的快捷按钮禁用，状态更新函数同时拒绝越界值；手动输入的 Prompt 长度和趋势扫描起点、终点也必须进行相同校验。`Token Sweep Start`、`Token Sweep End`、`Token Sweep Step` 三项归入独立的“Token趋势图扫描”小节。
+
+快捷输入区位于输入长度板块最下方，标题为“快捷输入”。用户先聚焦 `Prompt Token Length`、`Decode Output Tokens` 或任一 Token Sweep 输入框，再点击 `4K / 8K / 32K / 128K / 1M`，快捷值写入当前聚焦的目标字段；界面同时显示当前输入目标。
+
+桌面双栏布局中的“模型选择”与“输入长度”保持等宽。模型选择卡片内部的摘要使用左列 `0.75fr`、右列 `1.25fr`，将列分界明显向左移动，为 `Routed Experts / Layer` 和推荐精度一侧保留更多空间，避免专家总数等数字被拆行；不改变字体、字段结构或其他视觉样式。
+
+模型选择摘要不得使用含义模糊的 `Experts: active / total` 合并展示。专家信息拆分为 `Active Experts / Token`（每个 token 被路由选中的专家数）和 `Routed Experts / Layer`（每个 MoE 层可供路由选择的专家总数）。
+
+默认平台按 NVIDIA GB10 / DGX Spark 标称规格设置，`HBM / VRAM Capacity` 默认值为 `128 GB`。该值表示统一系统内存的标称容量；其余平台参数和模型精度参数保持各自现有口径。
+
+模型注册表通过 `parameterSourceUrl` 保存官方模型页。模型选择卡片底部展示“模型参数来源”外部链接，并随当前模型自动切换；页面组件不得硬编码模型 URL。
+- `Estimated Total`
+
+每段显示：
+
+- 绝对值
+- 占比
+- 注释
+
+若填写了 `memoryCapacityGb`：
+
+- 显示 `Fits Capacity` 或 `Exceeds Capacity`
+- 若超出，显示超出量
+
+### Section C: 公式追踪卡
+
+Tab：
+
+- `Prefill`
+- `Decode`
+- `Memory`
+
+每行显示：
+
+- `label`
+- `expression`
+- `evaluated`
+
+底部按钮：
+
+- `查看完整公式说明页`
+
+### Section D: 假设与备注卡
+
+内容：
+
+- 当前平台假设
+- 精度假设
+- 模型来源
+- 解析估算免责声明
+
+## 6. 交互流程
+
+## 6.1 首次进入
+
+- 页面加载默认模型：`deepseek-v4-flash`
+- 使用默认 token 与假设值填充表单
+- 若关键平台参数为空，则结果区显示空态
+
+## 6.2 输入与校验
+
+校验规则：
+
+- 所有数值字段必须为正数
+- `tokenRangeStart <= tokenRangeEnd`
+- `tokenRangeStep > 0`
+- `tokenRangeStep <= tokenRangeEnd - tokenRangeStart`，除非 `Start == End`
+- `batchSize >= 1`
+- `computeEfficiency`、`bandwidthEfficiency` 应限制在 `(0, 1]`
+
+校验失败时：
+
+- 保持现有结果不清空
+- 顶部状态改为 `invalid`
+- 对应字段显示错误
+
+## 6.3 计算触发
+
+首版采用显式触发：
+
+- 点击 `计算性能` 才执行计算
+
+触发后必须一次性产出：
+
+- 单点 summary 结果
+- comparison
+- breakdown
+- memory breakdown
+- formula trace
+- token sweep series
+
+## 6.4 页面跳转
+
+- 点击 `查看完整结构页` 跳转 `模型结构`
+- 点击 `查看完整公式说明页` 跳转 `公式说明`
+- 跳转时保持当前模型和输入状态
+
+## 7. 组件清单
+
+页面至少需要这些前端组件：
+
+- `ModelSelectorCard`
+- `WorkloadInputCard`
+- `PlatformInputCard`
+- `CalculationAssumptionsCard`
+- `CalculationToolbar`
+- `SummaryMetricCards`
+- `PrefillDecodeComparisonTable`
+- `TokenTrendChartPanel`
+- `BottleneckBreakdownPanel`
+- `IntermediateMetricsTable`
+- `StructureSummaryCard`
+- `MemoryBreakdownCard`
+- `FormulaTraceCard`
+- `AssumptionsNoteCard`
+
+## 8. 图表实现约束
+
+- 趋势图组件必须支持多序列和 tooltip 自定义
+- breakdown 图必须支持模块占比展示
+- 所有图表颜色语义必须稳定：
+  - `Prefill` 一套固定色
+  - `Decode` 一套固定色
+  - `Memory` 一套固定色
+  - `MoE / Attention / Indexer / Compressor / Output` 各自固定色
+
+## 9. 空态与异常态
+
+### 空态
+
+- 结果区显示引导说明
+- 说明需要先填写平台参数并点击计算
+
+### 计算失败态
+
+- 保留用户输入
+- 在结果区顶部显示错误条
+- 错误信息要区分：
+  - 输入非法
+  - 计算逻辑错误
+  - 不支持的模型策略
+
+### 超显存态
+
+- 不阻止展示结果
+- 显存卡和 summary 卡明确标出超出
+
+## 10. 验收标准
+
+- 页面可在不切页的情况下完成一次完整计算
+- 单点结果和 token 趋势图使用同一套输入上下文
+- token 范围可配置，且趋势图不是静态占位
+- 显存分析中必须包含 `weights`
+- 趋势图 tooltip 能看到 token 值、指标值和瓶颈分类
+- 结构摘要和公式追踪都能跳转到对应页面
+
+## 11. 后续扩展预留
+
+- `Platform Template` 扩展为预置 GPU 列表
+- `tokenSweepMode` 扩展为 `log-scale`
+- 支持多模型横向趋势对比
+- 支持导出当前图表与配置
+
+## 12. Qwen3.6-35B-A3B 验收基线
+
+`Qwen/Qwen3.6-35B-A3B` 在 128K prompt、Batch 1、BF16
+weights / experts / activations 下，公式策略必须得到：
+
+- Prefill：约 `2045.006 TFLOPs`
+- Decode：约 `26.340 GFLOPs/token`
+- 运行时显存：约 `78.217 GB`
+
+公式追溯必须分别列出 Full GQA、Gated DeltaNet、MoE、Full KV cache
+与线性 recurrent state，不能只显示聚合总量。
+
+FP8 版本在相同128K、Batch 1场景下的理论FLOPs保持不变，默认权重
+显存为 `34.660 GB`、active weight traffic 为 `3.311 GB/token`、
+运行时总显存为约 `43.557 GB`。页面切换至FP8模型时必须自动应用
+1/2/1 bytes（weight/activation/expert），不得继承Base的2/2/2配置。
+
+`Qwen/Qwen3.6-27B-FP8`使用独立的`hybrid-linear-dense`策略。128K、
+Batch 1验收值为Prefill `9771.463 TFLOPs`、Decode
+`100.320 GFLOPs/token`、权重流量`27.000 GB/token`及运行时总显存
+`42.966 GB`。切换模型后自动应用1/2 bytes（weight/activation）。

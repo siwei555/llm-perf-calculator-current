@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "status": "confirmed",
+  "modelId": "qwen3.6-35b-a3b",
+  "displayName": "Qwen/Qwen3.6-35B-A3B",
+  "family": "qwen3.6",
+  "sources": {
+    "analysis": "docs/Qwen_3.6/Qwen3.6-35B-A3B.md",
+    "config": "docs/Qwen_3.6/config/Qwen3.6-35B-A3B-config.json",
+    "upstreamModel": "https://huggingface.co/Qwen/Qwen3.6-35B-A3B"
+  },
+  "architecture": {
+    "architectureKind": "hybrid-linear-moe",
+    "formulaStrategyId": "hybrid-linear-moe",
+    "decoderLayers": 40,
+    "hiddenSize": 2048,
+    "attentionHeads": 16,
+    "kvHeads": 2,
+    "headDim": 256,
+    "contextLimit": 262144,
+    "layerSchedule": {
+      "fullAttention": 10,
+      "gatedDeltaNet": 30
+    },
+    "moe": {
+      "routedExperts": 256,
+      "activeExpertsPerToken": 8,
+      "sharedExperts": 1,
+      "intermediateSize": 512
+    },
+    "linearAttention": {
+      "keyHeads": 16,
+      "keyHeadDim": 128,
+      "valueHeads": 32,
+      "valueHeadDim": 128,
+      "convKernelSize": 4
+    }
+  },
+  "precision": {
+    "recommended": "BF16 weights / BF16 experts / BF16 activations",
+    "bytesPerWeight": 2,
+    "bytesPerExpert": 2,
+    "bytesPerActivation": 2
+  },
+  "parameterEstimate": {
+    "totalParamsB": 34.66,
+    "totalExpertParamsB": 32.36
+  },
+  "acceptedBaseline": {
+    "promptTokens": 131072,
+    "batchSize": 1,
+    "fullLayerPrefillTflops": 155.306,
+    "linearLayerPrefillTflops": 16.398,
+    "totalPrefillTflops": 2045.006,
+    "decodeGflopsPerToken": 26.34,
+    "activeWeightTrafficGbPerToken": 6.6225,
+    "cacheTrafficGbPerToken": 2.7178,
+    "weightMemoryGb": 69.32,
+    "persistentFullKvCacheGb": 2.684,
+    "persistentLinearStateGb": 0.065,
+    "peakTemporaryMemoryGb": 2.148,
+    "runtimeOverheadGb": 4,
+    "estimatedTotalMemoryGb": 78.217
+  }
+}
