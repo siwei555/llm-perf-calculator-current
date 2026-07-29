@@ -1175,7 +1175,7 @@ h3 {
 
 .formula-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   align-items: start;
 }
@@ -1303,30 +1303,77 @@ h3 {
   font: 0.9rem/1.55 "SFMono-Regular", Consolas, monospace;
 }
 
+.formula-variable-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.formula-variable-list h4 {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  letter-spacing: 0.04em;
+}
+
+.formula-variable-list dl {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.formula-variable-list__header,
+.formula-variable-list__row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.3fr) minmax(220px, 1fr) minmax(220px, 0.8fr);
+  gap: 14px;
+  padding: 10px 12px;
+}
+
+.formula-variable-list__header {
+  color: var(--text-muted);
+  background: rgba(15, 23, 42, 0.05);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.formula-variable-list__row {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.formula-variable-list__header + .formula-variable-list__row,
+.formula-variable-list__row + .formula-variable-list__row {
+  border-top: 1px solid var(--border-soft);
+}
+
+.formula-variable-list dt,
+.formula-variable-list dd {
+  margin: 0;
+}
+
+.formula-variable-list dt code {
+  color: #1544a8;
+  font-weight: 700;
+}
+
+.formula-variable-list dd {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.formula-variable-list__source {
+  font-size: 0.86rem;
+}
+
 .plain-list {
   display: grid;
   gap: 8px;
   margin: 0;
   padding-left: 18px;
   color: var(--text-muted);
-}
-
-.formula-block__evaluated {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border-soft);
-}
-
-.formula-block__evaluated span {
-  color: var(--text-muted);
-}
-
-.formula-block__evaluated strong {
-  font-size: 1.1rem;
 }
 
 .trace-preview {
@@ -1345,7 +1392,7 @@ h3 {
 
 .trace-preview__row {
   display: grid;
-  grid-template-rows: auto minmax(42px, auto) auto auto;
+  grid-template-rows: auto minmax(42px, auto) auto;
   gap: 8px;
   min-width: 0;
   padding: 12px;
@@ -1680,6 +1727,20 @@ h3 {
 
   .structure-flow__row {
     grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .formula-variable-list__header {
+    display: none;
+  }
+
+  .formula-variable-list__row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .formula-variable-list__source::before {
+    content: "数据来源：";
+    font-weight: 700;
   }
 
   .structure-flow__shape,

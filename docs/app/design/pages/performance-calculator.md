@@ -6,6 +6,23 @@
 > `weightSourceUrl`, rather than hardcoding either URL in a UI component.
 > The same source link is rendered by both the calculator trace card and the
 > Formula Notes page's `FormulaTracePreview`; these are separate render paths.
+>
+> The Formula Notes page selects its Prefill summary formula and explanatory
+> notes from an exhaustive `formulaStrategyId` map. The summary must therefore
+> match the selected model's dense, compressed-attention, or hybrid-linear
+> trace instead of showing a model-independent static formula.
+>
+> Formula Notes is definition-only: it omits the right-side current-substitution
+> panel, the summary substitution row, and evaluated numeric values under trace
+> formula cards. Formula expressions, explanatory notes, and source links remain.
+> Each summary formula renders an adjacent `变量含义` definition list. Prefill
+> variable definitions come from the same exhaustive `formulaStrategyId` guide
+> as the formula; TPS and memory formulas use their own complete definitions.
+> The standalone Symbol Table accordion is intentionally omitted. Each formula's
+> local variable list is the source of truth and contains three columns:
+> variable, meaning, and data source. Data-source labels distinguish workload
+> input, model config.json, platform/precision input, engineering estimates, and
+> formula-derived values.
 
 ## 1. 页面目的
 
