@@ -28,9 +28,6 @@ type Props = {
     value: CalculatorViewState[K]
   ) => void;
   onQuickRange: (target: QuickRangeTarget, tokenLength: number) => void;
-  onCalculate: () => void;
-  onReset: () => void;
-  statusText: string;
 };
 
 function numberValue(value: string) {
@@ -72,10 +69,7 @@ export function CalculatorControls({
   onPlatformChange,
   onWorkloadChange,
   onViewChange,
-  onQuickRange,
-  onCalculate,
-  onReset,
-  statusText
+  onQuickRange
 }: Props) {
   const [quickInputTarget, setQuickInputTarget] =
     useState<QuickRangeTarget>("prefillTokenLength");
@@ -401,17 +395,6 @@ export function CalculatorControls({
         </article>
       </div>
 
-      <div className="toolbar">
-        <div className="toolbar__actions">
-          <button type="button" className="primary-button" onClick={onCalculate}>
-            计算性能
-          </button>
-          <button type="button" className="secondary-button" onClick={onReset}>
-            重置
-          </button>
-        </div>
-        <p className="status-pill">{statusText}</p>
-      </div>
     </div>
   );
 }

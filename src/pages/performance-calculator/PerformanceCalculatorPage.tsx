@@ -68,24 +68,36 @@ export function PerformanceCalculatorPage() {
         onWorkloadChange={updateWorkload}
         onViewChange={updateView}
         onQuickRange={applyQuickRange}
-        onCalculate={calculate}
-        onReset={reset}
-        statusText={statusText}
       />
 
-      <div className="performance-results">
+      <div className="performance-primary-results">
+        <div className="toolbar">
+          <div className="toolbar__actions">
+            <button type="button" className="primary-button" onClick={calculate}>
+              计算性能
+            </button>
+            <button type="button" className="secondary-button" onClick={reset}>
+              重置
+            </button>
+          </div>
+          <p className="status-pill">{statusText}</p>
+        </div>
+
         <div className="performance-overview-row">
           <div className="performance-overview-row__metrics">
-          <MetricCards summary={result.summary} />
+            <MetricCards summary={result.summary} />
           </div>
           <MemoryBreakdownCard
             rows={result.memoryBreakdown}
+            weightSourceUrl={selectedModel.weightSourceUrl}
             runtimeOverheadGb={state.platform.runtimeOverheadGb}
             runtimeOverheadError={validationErrors.runtimeOverheadGb}
             onRuntimeOverheadChange={(value) => updatePlatform("runtimeOverheadGb", value)}
           />
         </div>
+      </div>
 
+      <div className="performance-results">
         <ComparisonTable rows={result.comparisonRows} />
 
         <div className="performance-summary-row">

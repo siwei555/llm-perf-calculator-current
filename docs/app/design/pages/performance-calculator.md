@@ -23,6 +23,19 @@
 > variable, meaning, and data source. Data-source labels distinguish workload
 > input, model config.json, platform/precision input, engineering estimates, and
 > formula-derived values.
+>
+> Desktop shell navigation remains pinned to the viewport with a `100vh`
+> independently scrollable sidebar. At the mobile breakpoint the sidebar
+> returns to normal document flow so it cannot cover page content.
+>
+> The primary result area is the third content row, after the page heading and
+> input controls. It contains the calculate/reset/status toolbar followed by
+> TTFT, Prefill TPS, Decode TPS, runtime memory, and memory breakdown. Detailed
+> comparison/trend sections follow below it.
+>
+> The primary memory breakdown renders a small `权重文件出处` link directly
+> beneath the Weights label. It receives the selected model's `weightSourceUrl`
+> from the registry and does not duplicate or hardcode repository URLs.
 
 ## 1. 页面目的
 

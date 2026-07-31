@@ -2,6 +2,7 @@ import type { MemoryBreakdownRow } from "../../../domain/performance/types";
 
 type Props = {
   rows: MemoryBreakdownRow[];
+  weightSourceUrl?: string;
   runtimeOverheadGb: number;
   runtimeOverheadError?: string;
   onRuntimeOverheadChange: (value: number) => void;
@@ -9,6 +10,7 @@ type Props = {
 
 export function MemoryBreakdownCard({
   rows,
+  weightSourceUrl,
   runtimeOverheadGb,
   runtimeOverheadError,
   onRuntimeOverheadChange
@@ -19,11 +21,22 @@ export function MemoryBreakdownCard({
       <div className="stack-list">
         {rows.map((row) => {
           const isRuntimeOverhead = row.key === "runtimeOverhead";
+          const isWeights = row.key === "weights";
 
           return (
             <div key={row.key} className="stack-list__row">
               <div className="memory-row__label">
                 <strong>{row.label}</strong>
+                {isWeights && weightSourceUrl ? (
+                  <a
+                    className="memory-row__source"
+                    href={weightSourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    权重文件出处 ↗
+                  </a>
+                ) : null}
                 {isRuntimeOverhead ? <small>估算假设，可手动编辑</small> : null}
               </div>
               {isRuntimeOverhead ? (
