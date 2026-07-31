@@ -833,6 +833,78 @@ function buildDenseFormulaTrace(
       ]
     },
     {
+      category: "decode",
+      rows: [
+        {
+          label: "Decode sliding attention visible length",
+          expression: "L_kv_decode(sliding) = n_win + 1",
+          evaluated: `${result.decodeSlidingLkv} tokens`
+        },
+        {
+          label: "Decode full attention visible length",
+          expression: "L_kv_decode(full) = S_ctx + 1",
+          evaluated: `${result.decodeCsaLkv} tokens`
+        },
+        {
+          label: "Sliding attn bytes per token",
+          expression: "B · e · L_kv_decode(sliding) · n_kv_s · c_s · 2 (K+V read)",
+          evaluated: `${formatMb(result.decodeSlidingBytesPerToken)} × ${slidingLayers} layers = ${formatMb(
+            result.decodeSlidingBytesPerToken * slidingLayers
+          )}`
+        },
+        {
+          label: "Full attn bytes per token",
+          expression: "B · e · L_kv_decode(full) · n_kv_f · c_f · 2 (K+V read)",
+          evaluated: `${formatMb(result.decodeCsaBytesPerToken)} × ${fullLayers} layers = ${formatMb(
+            result.decodeCsaBytesPerToken * fullLayers
+          )}`
+        },
+        {
+          label: "Decode cache bytes per token",
+          expression: "B_cache = L_sliding · B_sliding + L_full · B_full",
+          evaluated: formatMb(result.decodeCacheBytes)
+        },
+        {
+          label: "Decode weight bytes per token",
+          expression: isDenseMoe
+            ? "B_weights = N_non · bpw + N_exp · (k / E) · bpe"
+            : "B_weights = M_weights · 10^9",
+          evaluated: formatMb(result.decodeWeightBytes)
+        },
+        {
+          label: "Total decode bytes per token",
+          expression: "B_decode = B_weights + B_cache",
+          evaluated: `${formatMb(result.decodeWeightBytes)} + ${formatMb(
+            result.decodeCacheBytes
+          )} = ${formatMb(result.decodeBytes)}`
+        },
+        {
+          label: isDenseMoe
+            ? "Decode compute FLOPs per token (Sliding+Full+MoE)"
+            : "Decode compute FLOPs per token (Dense MLP estimate)",
+          expression: isDenseMoe
+            ? "L_sliding · F_sliding + L_full · F_full"
+            : "6 · D · I",
+          evaluated: formatGflops(result.decodeComputeFlopsPerToken)
+        },
+        {
+          label: "Decode compute ceiling",
+          expression: "decode_compute_ceiling = effective_compute / FLOPs_per_token",
+          evaluated: `${result.decodeComputeTps.toFixed(2)} tokens/s`
+        },
+        {
+          label: "Decode bandwidth ceiling",
+          expression: "decode_bandwidth_ceiling = effective_bandwidth / B_decode",
+          evaluated: `${result.decodeBandwidthTps.toFixed(2)} tokens/s`
+        },
+        {
+          label: "Effective Decode TPS",
+          expression: "min(decode_compute_ceiling, decode_bandwidth_ceiling)",
+          evaluated: `${result.decodeTps.toFixed(2)} tokens/s`
+        }
+      ]
+    },
+    {
       category: "memory",
       rows: [
         {

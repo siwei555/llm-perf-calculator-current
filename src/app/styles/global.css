@@ -31,12 +31,14 @@
 html,
 body,
 #root {
+  height: 100%;
   min-height: 100%;
+  overflow: hidden;
 }
 
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 0;
   background: var(--bg-app);
   color: inherit;
 }
@@ -56,7 +58,9 @@ h3 {
 .app-shell {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .sidebar {
@@ -145,6 +149,11 @@ h3 {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  height: 100vh;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .topbar {
@@ -908,6 +917,26 @@ h3 {
   background: rgba(255, 255, 255, 0.5);
 }
 
+.formula-trace__jump {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.formula-trace__jump:hover strong {
+  color: #1544a8;
+}
+
+.formula-trace__jump:focus-visible {
+  border-radius: 8px;
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
 .formula-trace__row code {
   color: #1544a8;
   white-space: pre-wrap;
@@ -1415,6 +1444,7 @@ h3 {
 }
 
 .trace-preview__row {
+  scroll-margin-block: 8rem;
   display: grid;
   grid-template-rows: auto minmax(42px, auto) auto;
   gap: 8px;
@@ -1457,6 +1487,43 @@ h3 {
 
 .trace-preview__source:hover {
   text-decoration: underline;
+}
+
+.trace-variable-table {
+  align-self: end;
+  width: 100%;
+  margin-top: 2px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.58);
+  overflow: hidden;
+}
+
+.trace-variable-table > summary {
+  padding: 11px 14px;
+  color: #24405f;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+}
+
+.trace-variable-table[open] > summary {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.trace-variable-table .table-scroll {
+  margin: 0;
+  padding: 8px;
+}
+
+.trace-variable-table .data-table {
+  min-width: 520px;
+}
+
+.trace-variable-table code {
+  color: #1544a8;
+  font: 0.82rem/1.45 "SFMono-Regular", Consolas, monospace;
 }
 
 .data-table--compact th,
@@ -1692,8 +1759,19 @@ h3 {
 }
 
 @media (max-width: 900px) {
+  html,
+  body,
+  #root {
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
+  }
+
   .app-shell {
     grid-template-columns: 1fr;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
   }
 
   .sidebar {
@@ -1702,6 +1780,11 @@ h3 {
     overflow-y: visible;
     gap: 20px;
     padding: 20px;
+  }
+
+  .app-shell__main {
+    height: auto;
+    overflow: visible;
   }
 
   .topbar,

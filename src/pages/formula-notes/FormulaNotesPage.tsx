@@ -1,6 +1,8 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import type { FormulaStrategyId, ModelId } from "../../domain/model/types";
 import type { FormulaTraceSection } from "../../domain/performance/types";
+import { getFormulaTraceRowTarget } from "../../features/performance-calculator/utils/formulaTraceTargets";
 import { useCalculatorContext } from "../../features/performance-calculator/state/CalculatorProvider";
 
 type PrefillFormulaGuide = {
@@ -13,6 +15,124 @@ type FormulaVariable = {
   symbol: string;
   meaning: string;
 };
+
+type TraceVariableDefinition = FormulaVariable & {
+  source: string;
+};
+
+const traceVariableCatalog: Record<string, TraceVariableDefinition> = {
+  S: { symbol: "S", meaning: "参与当前阶段计算的 token 数。", source: "工作负载输入" },
+  S_ctx: { symbol: "S_ctx", meaning: "Decode 开始时已经存在的上下文 token 数。", source: "工作负载输入" },
+  D: { symbol: "D", meaning: "模型隐藏层维度。", source: "模型 config.json" },
+  I: { symbol: "I", meaning: "FFN 或单个专家的中间层维度。", source: "模型 config.json" },
+  I_moe: { symbol: "I_moe", meaning: "单个 MoE 专家的中间层维度。", source: "模型 config.json" },
+  k: { symbol: "k", meaning: "每个 token 激活的 routed expert 数量。", source: "模型 config.json" },
+  E: { symbol: "E", meaning: "每层 routed expert 总数。", source: "模型 config.json" },
+  n_h: { symbol: "n_h", meaning: "Attention query head 数量。", source: "模型 config.json" },
+  n_h_I: { symbol: "n_h_I", meaning: "CSA indexer 的 attention head 数量。", source: "模型 config.json" },
+  n_kv: { symbol: "n_kv", meaning: "Key/Value head 数量。", source: "模型 config.json" },
+  n_kv_s: { symbol: "n_kv_s", meaning: "Sliding Attention 的 KV head 数量。", source: "模型 config.json" },
+  n_kv_f: { symbol: "n_kv_f", meaning: "Full Attention 的 KV head 数量。", source: "模型 config.json" },
+  n_v_heads: { symbol: "n_v_heads", meaning: "Linear Attention 的 value head 数量。", source: "模型 config.json" },
+  c: { symbol: "c", meaning: "Attention 单个 head 的维度。", source: "模型 config.json" },
+  c_s: { symbol: "c_s", meaning: "Sliding Attention 单个 head 的维度。", source: "模型 config.json" },
+  c_f: { symbol: "c_f", meaning: "Full Attention 单个 head 的维度。", source: "模型 config.json" },
+  c_I: { symbol: "c_I", meaning: "CSA indexer 单个 head 的维度。", source: "模型 config.json" },
+  c_kL: { symbol: "c_kL", meaning: "Linear Attention 的 key head 维度。", source: "模型 config.json" },
+  c_vL: { symbol: "c_vL", meaning: "Linear Attention 的 value head 维度。", source: "模型 config.json" },
+  r_q: { symbol: "r_q", meaning: "Query 低秩投影维度。", source: "模型 config.json" },
+  r_o: { symbol: "r_o", meaning: "Attention 输出低秩投影维度。", source: "模型 config.json" },
+  o_groups: { symbol: "o_groups", meaning: "Attention 输出投影的分组数。", source: "模型 config.json" },
+  sliding_window: { symbol: "sliding_window", meaning: "滑动注意力可见的局部窗口长度。", source: "模型 config.json" },
+  index_topk: { symbol: "index_topk", meaning: "CSA indexer 选取的历史 token 数量。", source: "模型 config.json" },
+  m_hca: { symbol: "m_hca", meaning: "HCA 历史 token 压缩倍率。", source: "模型 config.json" },
+  m_csa: { symbol: "m_csa", meaning: "CSA 历史 token 压缩倍率。", source: "模型 config.json" },
+  n_win: { symbol: "n_win", meaning: "滑动窗口长度的公式记号。", source: "模型 config.json" },
+  key_dim: { symbol: "key_dim", meaning: "Linear Attention 的总 key 投影维度。", source: "模型 config.json" },
+  value_dim: { symbol: "value_dim", meaning: "Linear Attention 的总 value 投影维度。", source: "模型 config.json" },
+  kernel: { symbol: "kernel", meaning: "Linear Attention Conv1D 的卷积核宽度。", source: "模型 config.json" },
+  conv_dim: { symbol: "conv_dim", meaning: "Linear Attention 卷积路径的通道维度。", source: "模型结构派生" },
+  causal_factor: { symbol: "causal_factor", meaning: "因果 Attention 对有效 QK 配对数采用的系数。", source: "公式假设" },
+  has_v_proj: { symbol: "has_v_proj", meaning: "是否存在独立 Value 投影的指示量。", source: "模型结构派生" },
+  B: { symbol: "B", meaning: "推理批大小。", source: "工作负载输入" },
+  e: { symbol: "e", meaning: "每个 cache/activation 元素占用的字节数。", source: "平台精度输入" },
+  bytes_per_elem: { symbol: "bytes_per_elem", meaning: "单个缓存元素的字节数。", source: "平台精度输入" },
+  bpw: { symbol: "bpw", meaning: "普通权重每个参数占用的字节数。", source: "平台精度输入" },
+  bpe: { symbol: "bpe", meaning: "专家权重每个参数占用的字节数。", source: "平台精度输入" },
+  N_non: { symbol: "N_non", meaning: "非专家权重参数量。", source: "模型注册数据/权重文件" },
+  N_exp: { symbol: "N_exp", meaning: "专家权重参数量。", source: "模型注册数据/权重文件" },
+  N_sliding: { symbol: "N_sliding", meaning: "Sliding Attention 层数。", source: "模型 config.json" },
+  N_csa: { symbol: "N_csa", meaning: "CSA 层数。", source: "模型 config.json" },
+  N_hca: { symbol: "N_hca", meaning: "HCA 层数。", source: "模型 config.json" },
+  L: { symbol: "L", meaning: "参与当前公式的 decoder 层数。", source: "模型 config.json" },
+  L_sliding: { symbol: "L_sliding", meaning: "Sliding Attention 层数。", source: "模型 config.json" },
+  L_full: { symbol: "L_full", meaning: "Full Attention 层数。", source: "模型 config.json" },
+  L_linear: { symbol: "L_linear", meaning: "Linear Attention 层数。", source: "模型 config.json" },
+  L_kv: { symbol: "L_kv", meaning: "单步 Decode 实际读取的 KV 可见长度。", source: "由上下文与模型结构派生" },
+  L_kv_decode: { symbol: "L_kv_decode", meaning: "Decode 阶段的有效 KV 可见长度。", source: "由上下文与模型结构派生" },
+  F_Q: { symbol: "F_Q", meaning: "Query 路径的 FLOPs。", source: "公式派生" },
+  F_KV: { symbol: "F_KV", meaning: "Key/Value 投影的 FLOPs。", source: "公式派生" },
+  F_core: { symbol: "F_core", meaning: "Attention 核心计算的 FLOPs。", source: "公式派生" },
+  F_O: { symbol: "F_O", meaning: "Attention 输出投影的 FLOPs。", source: "公式派生" },
+  F_MLP: { symbol: "F_MLP", meaning: "Dense MLP 的 FLOPs。", source: "公式派生" },
+  F_MoE: { symbol: "F_MoE", meaning: "MoE 前馈路径的 FLOPs。", source: "公式派生" },
+  F_FFN: { symbol: "F_FFN", meaning: "Dense FFN 路径的 FLOPs。", source: "公式派生" },
+  F_compressor: { symbol: "F_compressor", meaning: "Token compressor 的 FLOPs。", source: "公式派生" },
+  F_indexer: { symbol: "F_indexer", meaning: "CSA indexer 的 FLOPs。", source: "公式派生" },
+  F_inproj: { symbol: "F_inproj", meaning: "Linear Attention 输入投影的 FLOPs。", source: "公式派生" },
+  F_conv: { symbol: "F_conv", meaning: "Linear Attention Conv1D 的 FLOPs。", source: "公式派生" },
+  F_scan: { symbol: "F_scan", meaning: "Linear Attention recurrent scan 的 FLOPs。", source: "公式派生" },
+  F_sliding: { symbol: "F_sliding", meaning: "单个 Sliding 层的总 FLOPs。", source: "公式派生" },
+  F_csa: { symbol: "F_csa", meaning: "单个 CSA 层的总 FLOPs。", source: "公式派生" },
+  F_hca: { symbol: "F_hca", meaning: "单个 HCA 层的总 FLOPs。", source: "公式派生" },
+  F_full: { symbol: "F_full", meaning: "单个 Full Attention 层的总 FLOPs。", source: "公式派生" },
+  F_linear: { symbol: "F_linear", meaning: "单个 Linear Attention 层的总 FLOPs。", source: "公式派生" },
+  F_tmp: { symbol: "F_tmp", meaning: "当前步骤的临时计算量。", source: "公式派生" },
+  FLOPs_per_token: { symbol: "FLOPs_per_token", meaning: "生成一个 token 所需的估算 FLOPs。", source: "公式派生" },
+  effective_compute: { symbol: "effective_compute", meaning: "计入效率系数后的有效算力。", source: "平台参数" },
+  effective_bandwidth: { symbol: "effective_bandwidth", meaning: "计入效率系数后的有效带宽。", source: "平台参数" },
+  compute_ceiling: { symbol: "compute_ceiling", meaning: "由有效算力决定的吞吐上限。", source: "公式派生" },
+  bandwidth_ceiling: { symbol: "bandwidth_ceiling", meaning: "由有效带宽决定的吞吐上限。", source: "公式派生" },
+  decode_compute_ceiling: { symbol: "decode_compute_ceiling", meaning: "Decode 的算力吞吐上限。", source: "公式派生" },
+  decode_bandwidth_ceiling: { symbol: "decode_bandwidth_ceiling", meaning: "Decode 的带宽吞吐上限。", source: "公式派生" },
+  bytes_per_token: { symbol: "bytes_per_token", meaning: "每生成一个 token 的内存访问量。", source: "公式派生" },
+  B_sliding: { symbol: "B_sliding", meaning: "Sliding 层每 token 的缓存流量。", source: "公式派生" },
+  B_csa: { symbol: "B_csa", meaning: "CSA 层每 token 的缓存流量。", source: "公式派生" },
+  B_hca: { symbol: "B_hca", meaning: "HCA 层每 token 的缓存流量。", source: "公式派生" },
+  B_full: { symbol: "B_full", meaning: "Full Attention 层每 token 的缓存流量。", source: "公式派生" },
+  B_linear: { symbol: "B_linear", meaning: "Linear Attention 层每 token 的状态流量。", source: "公式派生" },
+  B_weights: { symbol: "B_weights", meaning: "每 token 访问的权重字节数。", source: "公式派生" },
+  B_cache: { symbol: "B_cache", meaning: "每 token 访问的缓存字节数。", source: "公式派生" },
+  B_decode: { symbol: "B_decode", meaning: "每 token 的 Decode 总内存流量。", source: "公式派生" },
+  M_weights: { symbol: "M_weights", meaning: "驻留模型权重占用。", source: "模型注册数据/权重文件" },
+  M_cache: { symbol: "M_cache", meaning: "持久 Decode cache 或 recurrent state 占用。", source: "公式派生" },
+  M_sliding: { symbol: "M_sliding", meaning: "Sliding Attention 持久缓存占用。", source: "公式派生" },
+  M_full: { symbol: "M_full", meaning: "Full Attention 持久 KV 缓存占用。", source: "公式派生" },
+  M_hca: { symbol: "M_hca", meaning: "HCA 持久缓存占用。", source: "公式派生" },
+  M_csa: { symbol: "M_csa", meaning: "CSA 持久缓存占用。", source: "公式派生" },
+  M_fullKV: { symbol: "M_fullKV", meaning: "Full Attention 持久 KV 缓存占用。", source: "公式派生" },
+  M_linearState: { symbol: "M_linearState", meaning: "Linear Attention 持久 recurrent state 占用。", source: "公式派生" },
+  M_decode_cache: { symbol: "M_decode_cache", meaning: "Decode 阶段持久缓存总占用。", source: "公式派生" },
+  M_tmp: { symbol: "M_tmp", meaning: "单步 Decode 临时工作集。", source: "公式派生" },
+  M_tmp_peak: { symbol: "M_tmp_peak", meaning: "单步 Decode 临时工作集峰值。", source: "公式派生" },
+  M_overhead: { symbol: "M_overhead", meaning: "运行时额外显存开销。", source: "平台参数：Runtime Overhead" },
+  M_runtime_overhead: { symbol: "M_runtime_overhead", meaning: "运行时额外显存开销。", source: "平台参数：Runtime Overhead" },
+  conv_state: { symbol: "conv_state", meaning: "Linear Attention 的卷积状态大小。", source: "模型结构派生" },
+  recurrent_state: { symbol: "recurrent_state", meaning: "Linear Attention 的递归状态大小。", source: "模型结构派生" }
+};
+
+function getTraceVariables(expression: string): TraceVariableDefinition[] {
+  const normalizedExpression = expression
+    .replace(/n_h\^I/g, "n_h_I")
+    .replace(/c\^I/g, "c_I");
+  const usedSymbols = new Set(
+    normalizedExpression.match(/[A-Za-z][A-Za-z0-9_]*/g) ?? []
+  );
+
+  return Object.entries(traceVariableCatalog)
+    .filter(([key]) => usedSymbols.has(key))
+    .map(([, definition]) => definition);
+}
 
 const prefillFormulaGuides = {
   "deepseek-v4-compressed-moe": {
@@ -200,14 +320,25 @@ function getVariableSource(symbol: string): string {
 }
 
 function FormulaAccordionItem({
+  id,
   title,
+  open,
+  onOpenChange,
   children
 }: {
+  id: string;
   title: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   children: ReactNode;
 }) {
   return (
-    <details className="formula-accordion">
+    <details
+      id={id}
+      className="formula-accordion"
+      open={open}
+      onToggle={(event) => onOpenChange(event.currentTarget.open)}
+    >
       <summary>
         <span>{title}</span>
         <span className="formula-accordion__icon" aria-hidden="true" />
@@ -276,38 +407,130 @@ function FormulaTracePreview({ trace }: { trace: FormulaTraceSection }) {
     <div className="trace-preview">
       <p className="eyebrow">formula trace</p>
       <div className="trace-preview__grid">
-        {trace.rows.map((row) => (
-          <div key={row.label} className="trace-preview__row">
-            <span className="trace-preview__label">{row.label}</span>
-            <code>{row.expression}</code>
-            {row.sourceUrl ? (
-              <a
-                className="trace-preview__source"
-                href={row.sourceUrl}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {row.sourceLabel ?? "来源"} ↗
-              </a>
-            ) : null}
-          </div>
-        ))}
+        {trace.rows.map((row, rowIndex) => {
+          const variables = getTraceVariables(row.expression);
+
+          return (
+            <div
+              key={row.label}
+              id={getFormulaTraceRowTarget(trace.category, rowIndex)}
+              className="trace-preview__row"
+            >
+              <span className="trace-preview__label">{row.label}</span>
+              <code>{row.expression}</code>
+              {row.sourceUrl ? (
+                <a
+                  className="trace-preview__source"
+                  href={row.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {row.sourceLabel ?? "来源"} ↗
+                </a>
+              ) : null}
+              {variables.length > 0 ? (
+                <details className="trace-variable-table">
+                  <summary>变量说明（{variables.length}）</summary>
+                  <div className="table-scroll">
+                    <table className="data-table data-table--compact">
+                      <thead>
+                        <tr>
+                          <th>变量</th>
+                          <th>含义</th>
+                          <th>数据来源</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {variables.map((variable) => (
+                          <tr key={variable.symbol}>
+                            <td><code>{variable.symbol}</code></td>
+                            <td>{variable.meaning}</td>
+                            <td>{variable.source}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
 export function FormulaNotesPage() {
+  const [searchParams] = useSearchParams();
+  const [openSections, setOpenSections] = useState<Set<string>>(() => new Set());
+  const pageRef = useRef<HTMLElement>(null);
   const {
-    state,
-    selectedFamily,
     availableFamilies,
-    availableModels,
-    selectedModel: model,
-    result,
-    updateModelFamily,
-    updateModelId
+    calculationRevision,
+    formulaModelId,
+    formulaSelectedFamily,
+    formulaAvailableModels,
+    formulaSelectedModel: model,
+    formulaResult: result,
+    updateFormulaModelFamily,
+    updateFormulaModelId
   } = useCalculatorContext();
+  const targetSection = searchParams.get("section");
+  const targetFormula = searchParams.get("formula");
+
+  useEffect(() => {
+    setOpenSections(new Set());
+    pageRef.current
+      ?.querySelectorAll<HTMLDetailsElement>("details")
+      .forEach((details) => {
+        details.open = false;
+      });
+  }, [calculationRevision]);
+
+  useEffect(() => {
+    if (!targetSection) {
+      return;
+    }
+
+    setOpenSections((current) => {
+      if (current.has(targetSection)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.add(targetSection);
+      return next;
+    });
+
+  }, [targetSection]);
+
+  useEffect(() => {
+    if (!targetSection || !openSections.has(targetSection)) {
+      return;
+    }
+
+    const targetId = targetFormula ?? targetSection;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(targetId)?.scrollIntoView({
+        behavior: "smooth",
+        block: targetFormula ? "center" : "start"
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [openSections, targetFormula, targetSection]);
+
+  const updateSectionOpen = (sectionId: string, open: boolean) => {
+    setOpenSections((current) => {
+      const next = new Set(current);
+      if (open) {
+        next.add(sectionId);
+      } else {
+        next.delete(sectionId);
+      }
+      return next;
+    });
+  };
 
   if (!result) {
     return null;
@@ -319,7 +542,7 @@ export function FormulaNotesPage() {
   const prefillFormulaGuide = prefillFormulaGuides[model.formulaStrategyId];
 
   return (
-    <section className="page-section">
+    <section className="page-section" ref={pageRef}>
       <div className="page-heading">
         <div>
           <p className="eyebrow">Traceable Formulae</p>
@@ -336,8 +559,8 @@ export function FormulaNotesPage() {
             <label className="field">
               <span>模型家族</span>
               <select
-                value={selectedFamily}
-                onChange={(event) => updateModelFamily(event.target.value)}
+                value={formulaSelectedFamily}
+                onChange={(event) => updateFormulaModelFamily(event.target.value)}
               >
                 {availableFamilies.map((family) => (
                   <option key={family.id} value={family.id}>
@@ -349,10 +572,10 @@ export function FormulaNotesPage() {
             <label className="field">
               <span>当前模型</span>
               <select
-                value={state.modelId}
-                onChange={(event) => updateModelId(event.target.value as ModelId)}
+                value={formulaModelId}
+                onChange={(event) => updateFormulaModelId(event.target.value as ModelId)}
               >
-                {availableModels.map((entry) => (
+                {formulaAvailableModels.map((entry) => (
                   <option key={entry.id} value={entry.id}>
                     {entry.displayName}
                   </option>
@@ -362,7 +585,12 @@ export function FormulaNotesPage() {
           </div>
 
           <div className="formula-accordion-list">
-            <FormulaAccordionItem title="Prefill FLOPs">
+            <FormulaAccordionItem
+              id="prefill-flops"
+              title="Prefill FLOPs"
+              open={openSections.has("prefill-flops")}
+              onOpenChange={(open) => updateSectionOpen("prefill-flops", open)}
+            >
               <FormulaBlock
                 title="Prefill FLOPs"
                 stage="prefill"
@@ -373,7 +601,12 @@ export function FormulaNotesPage() {
               />
             </FormulaAccordionItem>
 
-            <FormulaAccordionItem title="Prefill TPS">
+            <FormulaAccordionItem
+              id="prefill-tps"
+              title="Prefill TPS"
+              open={openSections.has("prefill-tps")}
+              onOpenChange={(open) => updateSectionOpen("prefill-tps", open)}
+            >
               <FormulaBlock
                 title="Prefill TPS"
                 stage="prefill"
@@ -390,7 +623,12 @@ export function FormulaNotesPage() {
               />
             </FormulaAccordionItem>
 
-            <FormulaAccordionItem title="Decode TPS">
+            <FormulaAccordionItem
+              id="decode-tps"
+              title="Decode TPS"
+              open={openSections.has("decode-tps")}
+              onOpenChange={(open) => updateSectionOpen("decode-tps", open)}
+            >
               <FormulaBlock
                 title="Decode TPS"
                 stage="decode"
@@ -408,7 +646,12 @@ export function FormulaNotesPage() {
               />
             </FormulaAccordionItem>
 
-            <FormulaAccordionItem title="Decode Memory">
+            <FormulaAccordionItem
+              id="decode-memory"
+              title="Decode Memory"
+              open={openSections.has("decode-memory")}
+              onOpenChange={(open) => updateSectionOpen("decode-memory", open)}
+            >
               <FormulaBlock
                 title="Decode Memory"
                 stage="memory"

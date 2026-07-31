@@ -62,8 +62,9 @@
      推荐精度为 FP8 weights / FP8 experts / BF16 activations。默认权重
      显存采用文本 decoder 简化口径 `34.660 GB`，不把 KV cache 或
      recurrent state 错误地按 FP8 计算。
-   - `Qwen/Qwen3.6-27B-FP8` 是 `hybrid-linear-dense`，包含48层
-     Gated DeltaNet、16层Full GQA和64层dense SwiGLU FFN；它没有
+- `Qwen/Qwen3.6-27B-FP8` 是 `hybrid-linear-dense`，共有 64 个
+  Decoder 层，其中包含 48 层 Gated DeltaNet、16 层 Full GQA；全部 64 层
+  均包含 dense SwiGLU FFN。它没有
      routed experts。推荐精度为FP8 weights / BF16 activations。
 8. 架构必须为后续支持更多模型留出通用扩展空间。
 

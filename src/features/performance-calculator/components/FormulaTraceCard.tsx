@@ -1,4 +1,9 @@
 import type { FormulaTraceSection } from "../../../domain/performance/types";
+import { Link } from "react-router-dom";
+import {
+  formulaSectionTargets,
+  getFormulaTraceRowTarget
+} from "../utils/formulaTraceTargets";
 
 export function FormulaTraceCard({
   sections
@@ -16,11 +21,17 @@ export function FormulaTraceCard({
               <span className="formula-trace__chevron" aria-hidden="true" />
             </summary>
             <div className="formula-trace__grid">
-              {section.rows.map((row) => (
+              {section.rows.map((row, rowIndex) => (
                 <div key={row.label} className="formula-trace__row">
-                  <strong>{row.label}</strong>
-                  <code>{row.expression}</code>
-                  <span>{row.evaluated}</span>
+                  <Link
+                    className="formula-trace__jump"
+                    to={`/formula-notes?section=${formulaSectionTargets[section.category]}&formula=${getFormulaTraceRowTarget(section.category, rowIndex)}`}
+                    title="在公式说明页查看对应小公式"
+                  >
+                    <strong>{row.label}</strong>
+                    <code>{row.expression}</code>
+                    <span>{row.evaluated}</span>
+                  </Link>
                   {row.sourceUrl ? (
                     <a
                       className="formula-trace__source"

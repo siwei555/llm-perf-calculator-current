@@ -332,13 +332,13 @@ function ParameterTable({ model }: { model: ModelDefinition }) {
 
 export function ModelStructurePage() {
   const {
-    state,
-    selectedFamily,
+    structureModelId,
+    structureSelectedFamily,
     availableFamilies,
-    availableModels,
-    selectedModel: model,
-    updateModelFamily,
-    updateModelId
+    structureAvailableModels,
+    structureSelectedModel: model,
+    updateStructureModelFamily,
+    updateStructureModelId
   } = useCalculatorContext();
 
   return (
@@ -358,8 +358,8 @@ export function ModelStructurePage() {
           <label className="field">
             <span>模型家族</span>
             <select
-              value={selectedFamily}
-              onChange={(event) => updateModelFamily(event.target.value)}
+              value={structureSelectedFamily}
+              onChange={(event) => updateStructureModelFamily(event.target.value)}
             >
               {availableFamilies.map((family) => (
                 <option key={family.id} value={family.id}>
@@ -371,10 +371,10 @@ export function ModelStructurePage() {
           <label className="field">
             <span>当前模型</span>
             <select
-              value={state.modelId}
-              onChange={(event) => updateModelId(event.target.value as ModelId)}
+              value={structureModelId}
+              onChange={(event) => updateStructureModelId(event.target.value as ModelId)}
             >
-              {availableModels.map((entry) => (
+              {structureAvailableModels.map((entry) => (
                 <option key={entry.id} value={entry.id}>
                   {entry.displayName}
                 </option>

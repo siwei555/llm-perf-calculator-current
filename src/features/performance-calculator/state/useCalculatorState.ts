@@ -36,6 +36,12 @@ export type CalculatorState = {
 };
 
 export type CalculatorValidation = Record<string, string>;
+type CalculationSnapshot = {
+  modelId: ModelId;
+  platform: PlatformInput;
+  workload: WorkloadInput;
+};
+
 export type QuickRangeTarget =
   | "prefillTokenLength"
   | "decodeOutputTokens"
@@ -49,7 +55,7 @@ const defaultState: CalculatorState = {
     computeThroughputTflops: 124,
     memoryBandwidthGbps: 273,
     memoryCapacityGb: 128,
-    computeEfficiency: 0.4,
+    computeEfficiency: 0.8,
     bandwidthEfficiency: 0.6,
     batchSize: 1,
     runtimeOverheadGb: 4,
@@ -140,6 +146,14 @@ function resolveDecodeOutputTokens(workload: WorkloadInput): WorkloadInput {
 
 export function useCalculatorState() {
   const [state, setState] = useState<CalculatorState>(defaultState);
+  const [calculationRevision, setCalculationRevision] = useState(0);
+  const [structureModelId, setStructureModelId] = useState<ModelId>(defaultState.modelId);
+  const [formulaModelId, setFormulaModelId] = useState<ModelId>(defaultState.modelId);
+  const [calculationSnapshot, setCalculationSnapshot] = useState<CalculationSnapshot>({
+    modelId: defaultState.modelId,
+    platform: { ...defaultState.platform },
+    workload: resolveDecodeOutputTokens(defaultState.workload)
+  });
   const [historyRecords, setHistoryRecords] =
     useState<CalculationHistoryRecord[]>(loadHistoryRecords);
   const [result, setResult] = useState<PerformanceResult | null>(() => {
@@ -161,6 +175,40 @@ export function useCalculatorState() {
     () => getModelsByFamily(selectedFamily),
     [selectedFamily]
   );
+  const structureSelectedModel = useMemo(
+    () => getModelDefinition(structureModelId),
+    [structureModelId]
+  );
+  const structureSelectedFamily = structureSelectedModel.family;
+  const structureAvailableModels = useMemo(
+    () => getModelsByFamily(structureSelectedFamily),
+    [structureSelectedFamily]
+  );
+  const formulaSelectedModel = useMemo(
+    () => getModelDefinition(formulaModelId),
+    [formulaModelId]
+  );
+  const formulaSelectedFamily = formulaSelectedModel.family;
+  const formulaAvailableModels = useMemo(
+    () => getModelsByFamily(formulaSelectedFamily),
+    [formulaSelectedFamily]
+  );
+  const formulaResult = useMemo(() => {
+    if (formulaModelId === calculationSnapshot.modelId) {
+      return result;
+    }
+
+    return calculatePerformanceResult(
+      formulaSelectedModel,
+      {
+        ...calculationSnapshot.platform,
+        bytesPerWeight: formulaSelectedModel.recommendedPrecision.bytesPerWeight,
+        bytesPerActivation: formulaSelectedModel.recommendedPrecision.bytesPerActivation,
+        bytesPerExpert: formulaSelectedModel.recommendedPrecision.bytesPerExpert
+      },
+      calculationSnapshot.workload
+    );
+  }, [calculationSnapshot, formulaModelId, formulaSelectedModel, result]);
 
   function updateModelId(modelId: ModelId) {
     const model = getModelDefinition(modelId);
@@ -185,6 +233,34 @@ export function useCalculatorState() {
     }
 
     updateModelId(firstModel.id);
+  }
+
+  function updateFormulaModelId(modelId: ModelId) {
+    setFormulaModelId(modelId);
+  }
+
+  function updateStructureModelId(modelId: ModelId) {
+    setStructureModelId(modelId);
+  }
+
+  function updateStructureModelFamily(family: string) {
+    const [firstModel] = getModelsByFamily(family);
+
+    if (!firstModel) {
+      return;
+    }
+
+    setStructureModelId(firstModel.id);
+  }
+
+  function updateFormulaModelFamily(family: string) {
+    const [firstModel] = getModelsByFamily(family);
+
+    if (!firstModel) {
+      return;
+    }
+
+    setFormulaModelId(firstModel.id);
   }
 
   function updatePlatform<K extends keyof PlatformInput>(key: K, value: PlatformInput[K]) {
@@ -243,13 +319,19 @@ export function useCalculatorState() {
   function reset() {
     setState(defaultState);
     const model = getModelDefinition(defaultState.modelId);
+    const resolvedWorkload = resolveDecodeOutputTokens(defaultState.workload);
     setResult(
       calculatePerformanceResult(
         model,
         defaultState.platform,
-        resolveDecodeOutputTokens(defaultState.workload)
+        resolvedWorkload
       )
     );
+    setCalculationSnapshot({
+      modelId: model.id,
+      platform: { ...defaultState.platform },
+      workload: resolvedWorkload
+    });
     setStatus("calculated");
   }
 
@@ -267,6 +349,13 @@ export function useCalculatorState() {
       resolveDecodeOutputTokens(state.workload)
     );
     setResult(nextResult);
+    setStructureModelId(model.id);
+    setFormulaModelId(model.id);
+    setCalculationSnapshot({
+      modelId: model.id,
+      platform: { ...state.platform },
+      workload: resolveDecodeOutputTokens(state.workload)
+    });
     const historyRecord: CalculationHistoryRecord = {
       id:
         globalThis.crypto?.randomUUID?.() ??
@@ -284,6 +373,7 @@ export function useCalculatorState() {
       saveHistoryRecords(next);
       return next;
     });
+    setCalculationRevision((current) => current + 1);
     setStatus("calculated");
   }
 
@@ -309,9 +399,23 @@ export function useCalculatorState() {
     selectedFamily,
     availableFamilies,
     availableModels,
+    structureModelId,
+    structureSelectedModel,
+    structureSelectedFamily,
+    structureAvailableModels,
+    formulaModelId,
+    formulaSelectedModel,
+    formulaSelectedFamily,
+    formulaAvailableModels,
+    formulaResult,
+    calculationRevision,
     validationErrors,
     updateModelFamily,
     updateModelId,
+    updateStructureModelFamily,
+    updateStructureModelId,
+    updateFormulaModelFamily,
+    updateFormulaModelId,
     updatePlatform,
     updateWorkload,
     updateView,

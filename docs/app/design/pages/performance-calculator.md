@@ -25,8 +25,21 @@
 > formula-derived values.
 >
 > Desktop shell navigation remains pinned to the viewport with a `100vh`
-> independently scrollable sidebar. At the mobile breakpoint the sidebar
-> returns to normal document flow so it cannot cover page content.
+> independently scrollable sidebar. The right-side content is a separate
+> `100vh` scroll container. Its offset is cached by route pathname, so
+> Performance Calculator, Model Structure, Formula Notes, and History retain
+> independent scroll positions when users switch with the sidebar. The active
+> route's offset is recorded continuously while scrolling and restored only
+> after navigation; it must not be sampled after the old page DOM has already
+> been replaced. Route views remain mounted while inactive, preserving local
+> UI state such as expanded Formula Notes accordions and History detail rows.
+> At the mobile breakpoint the sidebar and content return to normal document
+> flow so the sidebar cannot cover page content.
+>
+> On desktop, the main content area is also its own scroll container. The
+> performance calculator, model structure, formula notes, and history routes
+> retain separate scroll positions and restore them when revisited from the
+> sidebar. Mobile keeps normal document scrolling.
 >
 > The primary result area is the third content row, after the page heading and
 > input controls. It contains the calculate/reset/status toolbar followed by
@@ -36,6 +49,25 @@
 > The primary memory breakdown renders a small `权重文件出处` link directly
 > beneath the Weights label. It receives the selected model's `weightSourceUrl`
 > from the registry and does not duplicate or hardcode repository URLs.
+>
+> Every calculator Formula Trace card links to the matching Formula Notes
+> section through `/formula-notes?section=...`. The destination accordion opens
+> on navigation and scrolls into view. Prefill, Decode, and Memory traces map to
+> `prefill-flops`, `decode-tps`, and `decode-memory`; nested source links remain
+> independent anchors.
+>
+> Performance Calculator and Formula Notes own separate model selections.
+> Editing either selector does not update the other. A successful performance
+> calculation synchronizes the Formula Notes model to the model recorded in
+> that calculation snapshot. Reset does not override the Formula Notes selector.
+> Formula Notes traces are generated from its own model selection and the last
+> successful calculation's platform/workload snapshot.
+>
+> Every individual Formula Notes trace card ends with its own collapsed
+> `变量说明` table. Its rows are derived only from the symbols present in that
+> card's expression and show symbol, meaning, and data source. Switching models
+> or formula strategies therefore changes each local table without a
+> page-level shared variable list.
 
 ## 1. 页面目的
 
@@ -103,7 +135,7 @@ type PlatformInputState = {
 - `computeThroughputTflops = 124`
 - `memoryBandwidthGbps = 273`
 - `memoryCapacityGb = 256`
-- `computeEfficiency = 0.4`
+- `computeEfficiency = 0.8`
 - `bandwidthEfficiency = 0.6`
 - `batchSize = 1`
 - `precisionAssumptions = "FP8 weights + BF16 activations + FP4 experts"`
@@ -294,6 +326,10 @@ type TokenSweepSeriesPoint = {
 6. 第六行：中间量结果表独占全宽
 
 `公式追溯` 必须位于 `Token 趋势图` 正下方，并按 `Prefill`、`Decode`、`Memory` 小标题形成三行独立折叠区。三个折叠区首次进入均为收起状态，可分别展开；展开后该阶段的公式项按一行三列排列并顶部对齐。
+
+每张追溯小公式卡片必须链接到公式说明页中与其对应的小公式位置。跳转时自动展开所属的 Prefill、Decode 或 Memory 折叠板块，并将对应小公式滚动到可视区域；不能只定位到阶段大板块。
+
+`dense-decoder-transformer` 与 `dense-decoder-moe` 策略同样必须提供完整的 Decode 追溯，至少包含 Sliding/Full Attention 可见长度、分层 cache 流量、权重流量、Decode 总字节、每 token FLOPs、Compute Ceiling、Bandwidth Ceiling 和 Effective Decode TPS，不能只返回 Prefill 与 Memory。
 Prefill/Decode 对比表宽度不足时允许容器内部横向滚动，禁止内容越界覆盖相邻卡片。
 窄屏下第一行、摘要行和公式三列均改为单列堆叠。
 
@@ -318,7 +354,8 @@ Prefill/Decode 对比表宽度不足时允许容器内部横向滚动，禁止�
 
 交互：
 
-- 切换模型后，结构摘要、公式追踪和计算结果上下文都同步切换
+- 性能计算页切换模型时，仅更新本页待计算上下文，不实时修改模型结构页与公式说明页的手动选择
+- 每次成功执行 `计算性能` 后，模型结构页与公式说明页同步到本次计算使用的模型
 - 切换模型不会自动清空平台参数
 
 ### Card 2: 输入长度
@@ -663,6 +700,9 @@ Tab：
 - 点击 `查看完整结构页` 跳转 `模型结构`
 - 点击 `查看完整公式说明页` 跳转 `公式说明`
 - 跳转时保持当前模型和输入状态
+- 每次成功执行 `计算性能` 后，`模型结构` 与 `公式说明` 页的滚动位置重置到页面顶端
+- 每次成功执行 `计算性能` 后，`公式说明` 页的公式折叠项及小公式变量说明全部恢复为收起状态
+- 输入校验失败、未实际完成计算时，不重置上述页面状态
 
 ## 7. 组件清单
 
