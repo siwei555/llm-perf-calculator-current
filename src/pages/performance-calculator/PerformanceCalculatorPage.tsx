@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { ComparisonTable } from "../../features/performance-calculator/components/ComparisonTable";
 import { CalculatorControls } from "../../features/performance-calculator/components/CalculatorControls";
 import { FormulaTraceCard } from "../../features/performance-calculator/components/FormulaTraceCard";
@@ -6,10 +7,14 @@ import { MemoryBreakdownCard } from "../../features/performance-calculator/compo
 import { MetricCards } from "../../features/performance-calculator/components/MetricCards";
 import { TrendChart } from "../../features/performance-calculator/components/TrendChart";
 import { useCalculatorContext } from "../../features/performance-calculator/state/CalculatorProvider";
+import { getModelDefinition } from "../../engines/model-registry";
 
 export function PerformanceCalculatorPage() {
+  const [exportStatus, setExportStatus] = useState<"idle" | "exporting" | "success" | "error">("idle");
+  const [jsonExportStatus, setJsonExportStatus] = useState<"idle" | "exporting" | "success" | "error">("idle");
   const {
     state,
+    calculationSnapshot,
     result,
     status,
     selectedModel,
@@ -26,6 +31,10 @@ export function PerformanceCalculatorPage() {
     reset,
     calculate
   } = useCalculatorContext();
+  const calculatedModel = useMemo(
+    () => getModelDefinition(calculationSnapshot.modelId),
+    [calculationSnapshot.modelId]
+  );
 
   if (!result) {
     return null;
@@ -40,6 +49,44 @@ export function PerformanceCalculatorPage() {
           ? "结果已更新"
           : "待计算";
 
+  const exportExcel = async () => {
+    setExportStatus("exporting");
+    try {
+      const { exportPerformanceWorkbook } = await import(
+        "../../features/performance-calculator/services/performanceExcelExporter"
+      );
+      await exportPerformanceWorkbook({
+        model: calculatedModel,
+        snapshot: calculationSnapshot,
+        result
+      });
+      setExportStatus("success");
+      window.setTimeout(() => setExportStatus("idle"), 2500);
+    } catch (error) {
+      console.error("Failed to export performance workbook", error);
+      setExportStatus("error");
+    }
+  };
+
+  const exportJson = async () => {
+    setJsonExportStatus("exporting");
+    try {
+      const { exportPerformanceJson } = await import(
+        "../../features/performance-calculator/services/performanceJsonExporter"
+      );
+      exportPerformanceJson({
+        model: calculatedModel,
+        snapshot: calculationSnapshot,
+        result
+      });
+      setJsonExportStatus("success");
+      window.setTimeout(() => setJsonExportStatus("idle"), 2500);
+    } catch (error) {
+      console.error("Failed to export performance JSON", error);
+      setJsonExportStatus("error");
+    }
+  };
+
   return (
     <section className="page-section">
       <div className="page-heading">
@@ -47,9 +94,41 @@ export function PerformanceCalculatorPage() {
           <p className="eyebrow">Primary Workspace</p>
           <h2>性能计算</h2>
         </div>
-        <p className="page-description">
-          输入模型、平台参数和 token 范围，计算 prefill / decode 性能并查看趋势。
-        </p>
+        <div className="page-heading__actions">
+          <p className="page-description">
+            输入模型、平台参数和 token 范围，计算 prefill / decode 性能并查看趋势。
+          </p>
+          <button
+            type="button"
+            className="secondary-button export-excel-button"
+            onClick={exportExcel}
+            disabled={exportStatus === "exporting"}
+            title="导出最近一次成功计算的结果、输入假设、公式追溯和趋势数据"
+          >
+            {exportStatus === "exporting"
+              ? "正在导出…"
+              : exportStatus === "success"
+                ? "已导出 Excel"
+                : exportStatus === "error"
+                  ? "导出失败，请重试"
+                  : "导出 Excel"}
+          </button>
+          <button
+            type="button"
+            className="secondary-button export-excel-button"
+            onClick={exportJson}
+            disabled={jsonExportStatus === "exporting"}
+            title="导出最近一次成功计算的结构化 JSON 快照"
+          >
+            {jsonExportStatus === "exporting"
+              ? "正在导出…"
+              : jsonExportStatus === "success"
+                ? "已导出 JSON"
+                : jsonExportStatus === "error"
+                  ? "导出失败，请重试"
+                  : "导出 JSON"}
+          </button>
+        </div>
       </div>
 
       <CalculatorControls
@@ -70,7 +149,7 @@ export function PerformanceCalculatorPage() {
         onQuickRange={applyQuickRange}
       />
 
-      <div className="performance-primary-results">
+      <div id="performance-overview" className="performance-primary-results page-section-anchor">
         <div className="toolbar">
           <div className="toolbar__actions">
             <button type="button" className="primary-button" onClick={calculate}>
@@ -98,7 +177,9 @@ export function PerformanceCalculatorPage() {
       </div>
 
       <div className="performance-results">
-        <ComparisonTable rows={result.comparisonRows} />
+        <div id="performance-comparison" className="page-section-anchor">
+          <ComparisonTable rows={result.comparisonRows} />
+        </div>
 
         <div className="performance-summary-row">
           <article className="panel panel--large">
@@ -171,8 +252,9 @@ export function PerformanceCalculatorPage() {
             </article>
         </div>
 
-        <TrendChart
-          points={result.tokenSweepSeries}
+        <div id="performance-trend" className="page-section-anchor">
+          <TrendChart
+            points={result.tokenSweepSeries}
           selectedMetric={state.view.selectedTrendMetric}
           onMetricChange={(value) => updateView("selectedTrendMetric", value)}
           showDataPoints={state.view.showTrendDataPoints}
@@ -181,14 +263,19 @@ export function PerformanceCalculatorPage() {
           onShowBottleneckBackgroundChange={(value) =>
             updateView("showBottleneckBackground", value)
           }
-        />
+          />
+        </div>
 
         {state.view.showFormulaTrace ? (
-          <FormulaTraceCard sections={result.formulaTrace} />
+          <div id="performance-formula-trace" className="page-section-anchor">
+            <FormulaTraceCard sections={result.formulaTrace} />
+          </div>
         ) : null}
 
         {state.view.showIntermediateMetrics ? (
-          <IntermediateMetricsTable rows={result.intermediateMetrics} />
+          <div id="performance-intermediate" className="page-section-anchor">
+            <IntermediateMetricsTable rows={result.intermediateMetrics} />
+          </div>
         ) : null}
       </div>
     </section>

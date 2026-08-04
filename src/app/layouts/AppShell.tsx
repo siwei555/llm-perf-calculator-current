@@ -5,7 +5,7 @@ import {
   type PropsWithChildren,
   type UIEvent
 } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { SidebarNav } from "../../components/layout/SidebarNav";
 import { useCalculatorContext } from "../../features/performance-calculator/state/CalculatorProvider";
 
@@ -14,9 +14,35 @@ const calculationResetPaths = ["/model-structure", "/formula-notes"];
 
 export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation();
+  const navigate = useNavigate();
   const { calculationRevision } = useCalculatorContext();
   const mainRef = useRef<HTMLDivElement>(null);
   const activePathRef = useRef(location.pathname);
+  const pendingSectionRef = useRef<string | null>(null);
+
+  const scrollToSection = useCallback((sectionId: string) => {
+    const target = document.getElementById(sectionId);
+    if (target instanceof HTMLDetailsElement && !target.open) {
+      target.open = true;
+    }
+    target?.scrollIntoView({
+      behavior: "smooth",
+      block: "start"
+    });
+  }, []);
+
+  const handleSectionNavigate = useCallback(
+    (path: string, sectionId: string) => {
+      if (path === location.pathname) {
+        scrollToSection(sectionId);
+        return;
+      }
+
+      pendingSectionRef.current = sectionId;
+      navigate(path);
+    },
+    [location.pathname, navigate, scrollToSection]
+  );
 
   const handleMainScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
     pageScrollPositions.set(
@@ -33,7 +59,13 @@ export function AppShell({ children }: PropsWithChildren) {
 
     activePathRef.current = location.pathname;
     scroller.scrollTop = pageScrollPositions.get(location.pathname) ?? 0;
-  }, [location.pathname]);
+
+    const pendingSection = pendingSectionRef.current;
+    if (pendingSection) {
+      pendingSectionRef.current = null;
+      window.requestAnimationFrame(() => scrollToSection(pendingSection));
+    }
+  }, [location.pathname, scrollToSection]);
 
   useLayoutEffect(() => {
     calculationResetPaths.forEach((path) => {
@@ -43,7 +75,7 @@ export function AppShell({ children }: PropsWithChildren) {
 
   return (
     <div className="app-shell">
-      <SidebarNav />
+      <SidebarNav onSectionNavigate={handleSectionNavigate} />
       <div
         className="app-shell__main"
         ref={mainRef}

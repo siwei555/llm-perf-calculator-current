@@ -41,8 +41,8 @@ function HistoryRecordCard({
             <strong>{formatNumber(record.result.prefillTps)}</strong>
           </span>
           <span>
-            <small>Decode TPS</small>
-            <strong>{formatNumber(record.result.decodeTps)}</strong>
+            <small>Avg Decode TPS</small>
+            <strong>{formatNumber(record.result.averageDecodeTps ?? record.result.decodeTps)}</strong>
           </span>
           <span>
             <small>Memory</small>
@@ -61,6 +61,7 @@ function HistoryRecordCard({
             <div><dt>Token Sweep</dt><dd>{record.workload.tokenRangeStart.toLocaleString()} – {record.workload.tokenRangeEnd.toLocaleString()} / {record.workload.tokenRangeStep.toLocaleString()}</dd></div>
             <div><dt>Compute</dt><dd>{record.platform.computeThroughputTflops} TFLOPS × {record.platform.computeEfficiency}</dd></div>
             <div><dt>Bandwidth</dt><dd>{record.platform.memoryBandwidthGbps} GB/s × {record.platform.bandwidthEfficiency}</dd></div>
+            <div><dt>Prefill Cache Traffic Factor</dt><dd>{record.platform.prefillCacheTrafficFactor ?? 0.1}</dd></div>
             <div><dt>Memory Capacity</dt><dd>{record.platform.memoryCapacityGb} GB</dd></div>
             <div><dt>Batch Size</dt><dd>{record.platform.batchSize}</dd></div>
             <div><dt>Bytes / Weight</dt><dd>{record.platform.bytesPerWeight}</dd></div>
@@ -74,8 +75,11 @@ function HistoryRecordCard({
           <dl className="history-detail-list">
             <div><dt>TTFT</dt><dd>{formatNumber(record.result.ttftMs)} ms</dd></div>
             <div><dt>Prefill TPS</dt><dd>{formatNumber(record.result.prefillTps)} tokens/s</dd></div>
-            <div><dt>Decode TPS</dt><dd>{formatNumber(record.result.decodeTps)} tokens/s</dd></div>
-            <div><dt>Runtime Memory</dt><dd>{formatNumber(record.result.totalRuntimeMemoryGb)} GB</dd></div>
+            <div><dt>Initial Decode TPS</dt><dd>{formatNumber(record.result.initialDecodeTps ?? record.result.decodeTps)} tokens/s</dd></div>
+            <div><dt>Average Decode TPS</dt><dd>{formatNumber(record.result.averageDecodeTps ?? record.result.decodeTps)} tokens/s</dd></div>
+            <div><dt>Total Decode Time</dt><dd>{formatNumber(record.result.decodeTimeMs ?? 0)} ms</dd></div>
+            <div><dt>Final Decode Context</dt><dd>{(record.result.finalDecodeContext ?? record.workload.prefillTokenLength).toLocaleString()} tokens</dd></div>
+            <div><dt>Peak Runtime Memory</dt><dd>{formatNumber(record.result.peakRuntimeMemoryGb ?? record.result.totalRuntimeMemoryGb)} GB</dd></div>
             <div><dt>Prefill Bottleneck</dt><dd>{record.result.prefillBottleneck}</dd></div>
             <div><dt>Decode Bottleneck</dt><dd>{record.result.decodeBottleneck}</dd></div>
             <div>
@@ -163,7 +167,7 @@ export function HistoryPage() {
         </p>
       </div>
 
-      <article className="panel history-toolbar">
+      <article id="history-filters" className="panel history-toolbar page-section-anchor">
         <div className="history-toolbar__filters">
           <label className="field">
             <span>模型筛选</span>
@@ -199,7 +203,7 @@ export function HistoryPage() {
       </article>
 
       {visibleRecords.length > 0 ? (
-        <div className="history-list">
+        <div id="history-records" className="history-list page-section-anchor">
           {visibleRecords.map((record) => (
             <HistoryRecordCard
               key={record.id}
@@ -209,7 +213,7 @@ export function HistoryPage() {
           ))}
         </div>
       ) : (
-        <article className="panel panel--large history-empty">
+        <article id="history-records" className="panel panel--large history-empty page-section-anchor">
           <h3>{historyRecords.length === 0 ? "暂无计算记录" : "没有符合筛选条件的记录"}</h3>
           <p>
             {historyRecords.length === 0

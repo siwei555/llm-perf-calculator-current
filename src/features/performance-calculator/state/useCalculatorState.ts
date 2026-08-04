@@ -36,7 +36,7 @@ export type CalculatorState = {
 };
 
 export type CalculatorValidation = Record<string, string>;
-type CalculationSnapshot = {
+export type CalculationSnapshot = {
   modelId: ModelId;
   platform: PlatformInput;
   workload: WorkloadInput;
@@ -49,14 +49,25 @@ export type QuickRangeTarget =
   | "tokenRangeEnd"
   | "tokenRangeStep";
 
+const BF16_COMPUTE_THROUGHPUT_TFLOPS = 124;
+const FP8_COMPUTE_THROUGHPUT_TFLOPS = 248;
+
+function defaultComputeThroughputTflops(modelId: ModelId) {
+  const precisionLabel = getModelDefinition(modelId).recommendedPrecision.label;
+  return /FP8/i.test(precisionLabel)
+    ? FP8_COMPUTE_THROUGHPUT_TFLOPS
+    : BF16_COMPUTE_THROUGHPUT_TFLOPS;
+}
+
 const defaultState: CalculatorState = {
   modelId: "deepseek-v4-flash",
   platform: {
-    computeThroughputTflops: 124,
+    computeThroughputTflops: defaultComputeThroughputTflops("deepseek-v4-flash"),
     memoryBandwidthGbps: 273,
     memoryCapacityGb: 128,
-    computeEfficiency: 0.8,
+    computeEfficiency: 0.4,
     bandwidthEfficiency: 0.6,
+    prefillCacheTrafficFactor: 0.1,
     batchSize: 1,
     runtimeOverheadGb: 4,
     bytesPerWeight: 1,
@@ -100,10 +111,26 @@ function validateState(state: CalculatorState): CalculatorValidation {
     errors.runtimeOverheadGb = "需为大于或等于 0 的数值";
   }
 
+  if (
+    !Number.isFinite(state.platform.prefillCacheTrafficFactor) ||
+    state.platform.prefillCacheTrafficFactor < 0 ||
+    state.platform.prefillCacheTrafficFactor > 1
+  ) {
+    errors.prefillCacheTrafficFactor = "需在 0 到 1 之间";
+  }
+
   if (state.workload.prefillTokenLength <= 0) {
     errors.prefillTokenLength = "需大于 0";
   } else if (state.workload.prefillTokenLength > model.contextLimit) {
     errors.prefillTokenLength = `不能超过当前模型最大上下文 ${model.contextLimit.toLocaleString()}`;
+  }
+
+  const resolvedDecodeOutputTokens =
+    state.workload.decodeOutputTokens ?? state.workload.prefillTokenLength;
+  if (!Number.isFinite(resolvedDecodeOutputTokens) || resolvedDecodeOutputTokens <= 0) {
+    errors.decodeOutputTokens = "需大于 0";
+  } else if (state.workload.prefillTokenLength + resolvedDecodeOutputTokens > model.contextLimit) {
+    errors.decodeOutputTokens = `Prompt + Decode 不能超过当前模型最大上下文 ${model.contextLimit.toLocaleString()}`;
   }
 
   if (state.workload.tokenRangeStart > state.workload.tokenRangeEnd) {
@@ -217,6 +244,7 @@ export function useCalculatorState() {
       modelId,
       platform: {
         ...current.platform,
+        computeThroughputTflops: defaultComputeThroughputTflops(modelId),
         bytesPerWeight: model.recommendedPrecision.bytesPerWeight,
         bytesPerActivation: model.recommendedPrecision.bytesPerActivation,
         bytesPerExpert: model.recommendedPrecision.bytesPerExpert
@@ -392,6 +420,7 @@ export function useCalculatorState() {
 
   return {
     state,
+    calculationSnapshot,
     result,
     historyRecords,
     status,

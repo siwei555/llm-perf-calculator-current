@@ -555,7 +555,7 @@ export function FormulaNotesPage() {
 
       <div className="formula-layout">
         <main className="formula-nav panel">
-          <div className="formula-model-selectors">
+          <div id="formula-model-selection" className="formula-model-selectors page-section-anchor">
             <label className="field">
               <span>模型家族</span>
               <select

@@ -18,16 +18,28 @@ const cards = [
     subtext: "Current platform estimate"
   },
   {
-    key: "decodeTps",
-    label: "Decode TPS",
-    unit: "tokens/s",
-    subtext: "Steady-state decode rate"
-  },
-  {
-    key: "totalRuntimeMemoryGb",
-    label: "Runtime Memory",
+    key: "peakRuntimeMemoryGb",
+    label: "Peak Runtime Memory",
     unit: "GB",
     subtext: "Weights + cache + temp"
+  },
+  {
+    key: "initialDecodeTps",
+    label: "Initial Decode TPS",
+    unit: "tokens/s",
+    subtext: "First generated token"
+  },
+  {
+    key: "averageDecodeTps",
+    label: "Average Decode TPS",
+    unit: "tokens/s",
+    subtext: "Average over output range"
+  },
+  {
+    key: "decodeTimeMs",
+    label: "Decode Time",
+    unit: "s",
+    subtext: "Complete output duration"
   }
 ] as const;
 
@@ -62,24 +74,27 @@ export function MetricCards({ summary }: Props) {
         {cards.map((card) => {
           const rawValue = summary[card.key];
           const isTtft = card.key === "ttftMs";
-          const displayValue = isTtft ? rawValue / 1000 : rawValue;
+          const isDuration = isTtft || card.key === "decodeTimeMs";
+          const displayValue = isDuration ? rawValue / 1000 : rawValue;
           const tag =
             card.key === "prefillTps"
               ? summary.prefillBottleneck
-              : card.key === "decodeTps"
+              : card.key === "initialDecodeTps" || card.key === "averageDecodeTps"
                 ? summary.decodeBottleneck
-                : summary.memoryFitsCapacity
-                  ? "fits"
-                  : "insufficient";
+                : card.key === "peakRuntimeMemoryGb"
+                  ? summary.memoryFitsCapacity
+                    ? "fits"
+                    : "insufficient"
+                  : "calculated";
 
           return (
             <article key={card.key} className="metric-card">
               <p className="metric-card__label">{card.label}</p>
               <strong className="metric-card__value">
-                {displayValue.toFixed(isTtft ? 2 : 1)}
+                {displayValue.toFixed(isDuration ? 2 : 1)}
               </strong>
               <span className="metric-card__unit">{card.unit}</span>
-              {isTtft ? (
+              {isDuration ? (
                 <p className="metric-card__secondary">
                   {formatFriendlyDuration(displayValue)}
                 </p>

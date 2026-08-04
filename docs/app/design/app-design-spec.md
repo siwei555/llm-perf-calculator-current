@@ -235,6 +235,15 @@
 - `公式说明`
 - `历史记录`
 
+每个一级页面入口下方提供可折叠的二级小标题导航：
+
+- 当前页面的二级导航默认展开，用户也可独立展开或收起其他页面的导航。
+- 点击二级导航时切换到对应页面，并精确滚动到该小标题对应的内容区块；同页跳转不重置表单、计算结果或页面状态。
+- `性能计算` 包含模型选择、输入长度、平台参数、计算假设、核心结果、性能对比、Token 趋势、公式追溯和中间量结果表；其中公式追溯与中间量结果表的内容显示仍由计算假设中的开关控制。
+- `模型结构` 包含模型选择、结构流图、模块参数、层级排布和参数与性能关联。
+- `公式说明` 包含模型选择、Prefill FLOPs、Prefill TPS、Decode TPS 和 Decode Memory。
+- `历史记录` 包含筛选与排序、计算记录。
+
 样式要求：
 
 - 当前页面高亮
@@ -435,9 +444,15 @@
 - `Batch Size`
 - `Compute Efficiency`
 - `Bandwidth Efficiency`
+- `Prefill Cache Traffic Factor`
+  - 默认 `0.10`
+  - 允许范围 `0–1`
+  - 直接显示在计算假设区域并允许手动编辑，不放入折叠区
 - `Show Intermediate Metrics` 开关
 - `Show Formula Trace` 开关
 - 当估算内存超过容量时显示红色内存不足提示，不改变性能计算结果
+- Decode 结果区分 `Initial Decode TPS`、完整输出区间的 `Average Decode TPS`、`Total Decode Time` 和最终上下文的 `Peak Runtime Memory`。
+- `Prompt Token Length + Decode Output Tokens` 不得超过当前模型的 `Context Limit`。
 
 #### 参数区底部操作条
 

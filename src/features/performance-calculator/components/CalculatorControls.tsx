@@ -77,7 +77,7 @@ export function CalculatorControls({
   return (
     <div className="calculator-controls">
       <div className="panel-grid panel-grid--controls">
-        <article className="panel panel--model-selection">
+        <article id="performance-model-selection" className="panel panel--model-selection page-section-anchor">
           <h3>模型选择</h3>
           <label className="field">
             <span>模型家族</span>
@@ -145,7 +145,7 @@ export function CalculatorControls({
           ) : null}
         </article>
 
-        <article className="panel">
+        <article id="performance-input-length" className="panel page-section-anchor">
           <h3>输入长度</h3>
           <div className="form-grid">
             <label className="field">
@@ -175,6 +175,7 @@ export function CalculatorControls({
                 }
               />
               <small>留空时按 Prompt Token Length 计算</small>
+              <FieldError message={validationErrors.decodeOutputTokens} />
             </label>
           </div>
           <h4 className="input-section-title">Token趋势图扫描</h4>
@@ -246,7 +247,7 @@ export function CalculatorControls({
           </div>
         </article>
 
-        <article className="panel">
+        <article id="performance-platform" className="panel page-section-anchor">
           <h3>平台参数</h3>
           <div className="form-grid">
             <label className="field">
@@ -328,7 +329,7 @@ export function CalculatorControls({
           </div>
         </article>
 
-        <article className="panel">
+        <article id="performance-assumptions" className="panel page-section-anchor">
           <h3>计算假设</h3>
           <div className="form-grid">
             <label className="field">
@@ -362,6 +363,21 @@ export function CalculatorControls({
                   onPlatformChange("bandwidthEfficiency", numberValue(event.target.value))
                 }
               />
+            </label>
+            <label className="field">
+              <span>Prefill Cache Traffic Factor</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                max="1"
+                value={platform.prefillCacheTrafficFactor}
+                onChange={(event) =>
+                  onPlatformChange("prefillCacheTrafficFactor", numberValue(event.target.value))
+                }
+              />
+              <small>默认 0.10；允许范围 0–1。用于估算 Prefill cache 流量占持久 cache 容量的比例。</small>
+              <FieldError message={validationErrors.prefillCacheTrafficFactor} />
             </label>
             <label className="field field--checkbox">
               <input

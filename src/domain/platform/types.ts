@@ -4,6 +4,8 @@ export type PlatformInput = {
   memoryCapacityGb: number;
   computeEfficiency: number;
   bandwidthEfficiency: number;
+  /** Prefill 阶段 cache 流量相对于持久 cache 容量的估算比例，范围 0–1 */
+  prefillCacheTrafficFactor: number;
   batchSize: number;
   /** 运行时额外显存的估算假设（GB），允许用户按实际运行框架手动调整 */
   runtimeOverheadGb: number;

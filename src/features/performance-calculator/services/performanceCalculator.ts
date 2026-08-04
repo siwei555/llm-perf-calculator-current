@@ -5,6 +5,7 @@ import type {
   FormulaTraceSection,
   IntermediateMetric,
   PerformanceResult,
+  PerformanceProjectionPoint,
   TokenSweepPoint
 } from "../../../domain/performance/types";
 import type { PlatformInput } from "../../../domain/platform/types";
@@ -62,6 +63,73 @@ type FullComputation = {
   hcaLayer: LayerBreakdown;
 };
 
+type ComputeFunction = (
+  model: ModelDefinition,
+  platform: PlatformInput,
+  workload: WorkloadInput,
+  sequenceLength: number
+) => FullComputation;
+
+type DecodeGenerationSummary = {
+  initialDecodeTps: number;
+  averageDecodeTps: number;
+  decodeTimeMs: number;
+  outputTokens: number;
+  finalContext: number;
+  peakResult: FullComputation;
+};
+
+function summarizeDecodeGeneration(
+  computeFn: ComputeFunction,
+  model: ModelDefinition,
+  platform: PlatformInput,
+  workload: WorkloadInput,
+  initialResult: FullComputation
+): DecodeGenerationSummary {
+  const outputTokens = workload.decodeOutputTokens ?? workload.prefillTokenLength;
+  const promptLength = workload.prefillTokenLength;
+  const maxSamples = 256;
+  const sampleCount = Math.min(outputTokens, maxSamples);
+  let latencySumMs = 0;
+
+  for (let sample = 0; sample < sampleCount; sample += 1) {
+    const tokenOffset =
+      sampleCount === outputTokens
+        ? sample
+        : Math.round((sample * (outputTokens - 1)) / Math.max(sampleCount - 1, 1));
+    const contextLength = promptLength + tokenOffset;
+    const stepResult =
+      tokenOffset === 0
+        ? initialResult
+        : computeFn(
+            model,
+            platform,
+            { ...workload, prefillTokenLength: contextLength },
+            contextLength
+          );
+    latencySumMs += 1000 / Math.max(stepResult.decodeTps, 1e-6);
+  }
+
+  const averageStepLatencyMs = latencySumMs / sampleCount;
+  const decodeTimeMs = averageStepLatencyMs * outputTokens;
+  const finalContext = promptLength + outputTokens;
+  const peakResult = computeFn(
+    model,
+    platform,
+    { ...workload, prefillTokenLength: finalContext },
+    finalContext
+  );
+
+  return {
+    initialDecodeTps: initialResult.decodeTps,
+    averageDecodeTps: outputTokens / Math.max(decodeTimeMs / 1000, 1e-6),
+    decodeTimeMs,
+    outputTokens,
+    finalContext,
+    peakResult
+  };
+}
+
 function gbpsToBytesPerSecond(valueGbps: number) {
   return valueGbps * 1_000_000_000;
 }
@@ -110,6 +178,19 @@ function inferBottleneck(
   bandwidthLimit: number
 ): BottleneckType {
   return computeLimit <= bandwidthLimit ? "compute-bound" : "bandwidth-bound";
+}
+
+function ceilingAtEfficiency(
+  computeCeiling: number,
+  bandwidthCeiling: number,
+  platform: PlatformInput,
+  efficiency: number
+) {
+  const compute =
+    computeCeiling * (efficiency / Math.max(platform.computeEfficiency, 1e-6));
+  const bandwidth =
+    bandwidthCeiling * (efficiency / Math.max(platform.bandwidthEfficiency, 1e-6));
+  return Math.min(compute, bandwidth);
 }
 
 function flopsQ(model: ModelDefinition, sequenceLength: number) {
@@ -491,7 +572,8 @@ function computeDenseFullResult(
   const decodeSlidingLkv = nWin + 1;
   const decodeFullLkv = S_ctx + 1;
   const tmpPeakLkv = Math.max(decodeSlidingLkv, decodeFullLkv);
-  const tmpPeakBytes = B * 2 * 2 * model.attentionHeads * tmpPeakLkv * Math.max(cSliding, cFull);
+  const tmpPeakBytes =
+    B * 2 * model.attentionHeads * tmpPeakLkv * Math.max(cSliding, cFull) * e;
   const tmpPeakGb = bytesToGb(tmpPeakBytes);
 
   const overheadGb = platform.runtimeOverheadGb;
@@ -505,7 +587,9 @@ function computeDenseFullResult(
   );
 
   const prefillComputeTps = (effectiveCompute * S) / prefillFlops;
-  const prefillTrafficBytes = weightGb * 1_000_000_000 + cacheGb * 1_000_000_000 * 0.1;
+  const prefillTrafficBytes =
+    weightGb * 1_000_000_000 +
+    cacheGb * 1_000_000_000 * platform.prefillCacheTrafficFactor;
   const prefillBandwidthTps = (effectiveBandwidth * S) / prefillTrafficBytes;
 
   const decodeSlidingBytesPerToken = denseCacheBytesPerLayer(model, B, decodeSlidingLkv, nKvSliding, cSliding, e);
@@ -661,7 +745,9 @@ function computeFullResult(
   );
   const prefillComputeTps = (effectiveCompute * sequenceLength) / prefillFlops;
   const prefillTrafficBytes =
-    (weightGb * 1_000_000_000 + cacheGb * 1_000_000_000 * 0.1) * platform.batchSize;
+    (weightGb * 1_000_000_000 +
+      cacheGb * 1_000_000_000 * platform.prefillCacheTrafficFactor) *
+    platform.batchSize;
   const prefillBandwidthTps = (effectiveBandwidth * sequenceLength) / prefillTrafficBytes;
   const decodeSlidingLkv = model.slidingWindow;
   const decodeCsaVisibleLength = decodeCsaLkv(model, workload.prefillTokenLength);
@@ -954,7 +1040,10 @@ function buildDenseFormulaTrace(
   ];
 }
 
-function buildComparisonRows(result: FullComputation): ComparisonRow[] {
+function buildComparisonRows(
+  result: FullComputation,
+  decodeGeneration: DecodeGenerationSummary
+): ComparisonRow[] {
   return [
     {
       label: "Dominant Cost",
@@ -978,13 +1067,25 @@ function buildComparisonRows(result: FullComputation): ComparisonRow[] {
       label: "Effective Throughput",
       unit: "tokens/s",
       prefill: result.prefillTps.toFixed(2),
-      decode: result.decodeTps.toFixed(2)
+      decode: decodeGeneration.averageDecodeTps.toFixed(2)
     },
     {
       label: "Latency",
       unit: "ms",
       prefill: result.ttftMs.toFixed(0),
-      decode: (1000 / Math.max(result.decodeTps, 1e-6)).toFixed(2)
+      decode: (decodeGeneration.decodeTimeMs / decodeGeneration.outputTokens).toFixed(2)
+    },
+    {
+      label: "Initial Decode Throughput",
+      unit: "tokens/s",
+      prefill: "-",
+      decode: decodeGeneration.initialDecodeTps.toFixed(2)
+    },
+    {
+      label: "Total Decode Time",
+      unit: "ms",
+      prefill: "-",
+      decode: decodeGeneration.decodeTimeMs.toFixed(2)
     }
   ];
 }
@@ -993,9 +1094,18 @@ function buildIntermediateMetrics(
   model: ModelDefinition,
   platform: PlatformInput,
   workload: WorkloadInput,
-  result: FullComputation
+  result: FullComputation,
+  decodeGeneration: DecodeGenerationSummary
 ): IntermediateMetric[] {
   return [
+    {
+      key: "prefill_cache_traffic_factor",
+      label: "Prefill Cache Traffic Factor",
+      symbol: "f_cache",
+      value: platform.prefillCacheTrafficFactor.toFixed(2),
+      unit: "ratio",
+      source: "config"
+    },
     {
       key: "hidden_size",
       label: "Hidden Size",
@@ -1035,6 +1145,38 @@ function buildIntermediateMetrics(
       value: (result.decodeBytes / 1_000_000).toFixed(2),
       unit: "MB/token",
       source: "formula"
+    },
+    {
+      key: "initial_decode_tps",
+      label: "Initial Decode TPS",
+      symbol: "TPS_decode_initial",
+      value: decodeGeneration.initialDecodeTps.toFixed(2),
+      unit: "tokens/s",
+      source: "derived"
+    },
+    {
+      key: "average_decode_tps",
+      label: "Average Decode TPS",
+      symbol: "TPS_decode_avg",
+      value: decodeGeneration.averageDecodeTps.toFixed(2),
+      unit: "tokens/s",
+      source: "derived"
+    },
+    {
+      key: "decode_time",
+      label: "Total Decode Time",
+      symbol: "T_decode",
+      value: decodeGeneration.decodeTimeMs.toFixed(2),
+      unit: "ms",
+      source: "derived"
+    },
+    {
+      key: "final_decode_context",
+      label: "Final Decode Context",
+      symbol: "S_final",
+      value: decodeGeneration.finalContext.toLocaleString(),
+      unit: "tokens",
+      source: "derived"
     },
     {
       key: "decode_weight_bytes",
@@ -1466,7 +1608,7 @@ function computeHybridLinearMoeResult(
 
   // ── Temp peak (full attention repeat_kv) ──
   const fullTmpLkv = S_ctx + 1;
-  const tmpPeakBytes = B * 2 * 2 * n_h * fullTmpLkv * c;
+  const tmpPeakBytes = B * 2 * n_h * fullTmpLkv * c * e;
   const tmpPeakGb = bytesToGb(tmpPeakBytes);
   const tmpPeakLkv = fullTmpLkv;
 
@@ -1482,7 +1624,8 @@ function computeHybridLinearMoeResult(
 
   const prefillComputeTps = (effectiveCompute * S) / prefillFlops;
   const prefillTrafficBytes =
-    (weightGb * 1_000_000_000 + cacheGb * 1_000_000_000 * 0.1) * B;
+    (weightGb * 1_000_000_000 +
+      cacheGb * 1_000_000_000 * platform.prefillCacheTrafficFactor) * B;
   const prefillBandwidthTps = (effectiveBandwidth * S) / prefillTrafficBytes;
 
   // ── Decode FLOPs (single token) ──
@@ -1796,6 +1939,7 @@ export function calculatePerformanceResult(
   }
 
   const tokenSweepSeries: TokenSweepPoint[] = [];
+  const projectionSeries: PerformanceProjectionPoint[] = [];
 
   for (
     let tokenLength = workload.tokenRangeStart;
@@ -1815,58 +1959,162 @@ export function calculatePerformanceResult(
     });
   }
 
+  const standardProjectionContexts = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072]
+    .filter((contextLength) => contextLength <= workload.tokenRangeEnd);
+  if (standardProjectionContexts.length === 0) {
+    standardProjectionContexts.push(workload.tokenRangeEnd);
+  }
+  standardProjectionContexts.forEach((contextLength) => {
+    const projectionWorkload = { ...workload, prefillTokenLength: contextLength };
+    const pointResult = computeFn(model, platform, projectionWorkload, contextLength);
+    const prefillTps20 = ceilingAtEfficiency(
+      pointResult.prefillComputeTps,
+      pointResult.prefillBandwidthTps,
+      platform,
+      0.2
+    );
+    const prefillTps40 = ceilingAtEfficiency(
+      pointResult.prefillComputeTps,
+      pointResult.prefillBandwidthTps,
+      platform,
+      0.4
+    );
+    projectionSeries.push({
+      contextLength,
+      prefillGflopsPerToken: pointResult.prefillFlops / contextLength / 1_000_000_000,
+      prefillTps20,
+      prefillTps40,
+      prefillTtftSec40: contextLength / Math.max(prefillTps40, 1e-6),
+      persistentCacheGb: pointResult.cacheGb,
+      temporaryMemoryGb: pointResult.tmpPeakGb,
+      totalMemoryGb: pointResult.totalRuntimeMemoryGb,
+      decodeTps40: ceilingAtEfficiency(
+        pointResult.decodeComputeTps,
+        pointResult.decodeBandwidthTps,
+        platform,
+        0.4
+      ),
+      decodeTps60: ceilingAtEfficiency(
+        pointResult.decodeComputeTps,
+        pointResult.decodeBandwidthTps,
+        platform,
+        0.6
+      ),
+      decodeTps80: ceilingAtEfficiency(
+        pointResult.decodeComputeTps,
+        pointResult.decodeBandwidthTps,
+        platform,
+        0.8
+      )
+    });
+  });
+
   const activeResult = computeFn(
     model,
     platform,
     workload,
     workload.prefillTokenLength
   );
+  const decodeGeneration = summarizeDecodeGeneration(
+    computeFn,
+    model,
+    platform,
+    workload,
+    activeResult
+  );
+  const peakResult = decodeGeneration.peakResult;
+  const formulaTrace = buildFormulaTrace(model, workload, activeResult);
+  const peakMemoryTrace = buildFormulaTrace(
+    model,
+    { ...workload, prefillTokenLength: decodeGeneration.finalContext },
+    peakResult
+  ).find((section) => section.category === "memory");
+  const memoryTraceIndex = formulaTrace.findIndex((section) => section.category === "memory");
+  if (peakMemoryTrace && memoryTraceIndex >= 0) {
+    formulaTrace[memoryTraceIndex] = peakMemoryTrace;
+  }
+  const prefillTrace = formulaTrace.find((section) => section.category === "prefill");
+  prefillTrace?.rows.push({
+    label: "Prefill cache traffic",
+    expression: "B_prefill = B_weights + M_cache * prefill_cache_traffic_factor",
+    evaluated: `${activeResult.weightGb.toFixed(3)} GB + ${activeResult.cacheGb.toFixed(3)} GB * ${platform.prefillCacheTrafficFactor.toFixed(2)}`
+  });
+  const decodeTrace = formulaTrace.find((section) => section.category === "decode");
+  decodeTrace?.rows.push(
+    {
+      label: "Initial Decode TPS",
+      expression: "TPS_decode_initial = TPS_decode(S_prompt)",
+      evaluated: `${decodeGeneration.initialDecodeTps.toFixed(2)} tokens/s`
+    },
+    {
+      label: "Average Decode TPS",
+      expression: "TPS_decode_avg = N_decode / sum_t(1 / TPS_decode(S_prompt + t))",
+      evaluated: `${decodeGeneration.averageDecodeTps.toFixed(2)} tokens/s over ${decodeGeneration.outputTokens.toLocaleString()} tokens`
+    },
+    {
+      label: "Total Decode Time",
+      expression: "T_decode = sum_t(1 / TPS_decode(S_prompt + t))",
+      evaluated: `${decodeGeneration.decodeTimeMs.toFixed(2)} ms`
+    },
+    {
+      label: "Final Decode Context",
+      expression: "S_final = S_prompt + N_decode",
+      evaluated: `${decodeGeneration.finalContext.toLocaleString()} tokens`
+    }
+  );
 
   return {
     summary: {
       ttftMs: activeResult.ttftMs,
       prefillTps: activeResult.prefillTps,
-      decodeTps: activeResult.decodeTps,
-      totalRuntimeMemoryGb: activeResult.totalRuntimeMemoryGb,
+      initialDecodeTps: decodeGeneration.initialDecodeTps,
+      averageDecodeTps: decodeGeneration.averageDecodeTps,
+      decodeTimeMs: decodeGeneration.decodeTimeMs,
+      finalDecodeContext: decodeGeneration.finalContext,
+      peakRuntimeMemoryGb: peakResult.totalRuntimeMemoryGb,
+      decodeTps: decodeGeneration.averageDecodeTps,
+      totalRuntimeMemoryGb: peakResult.totalRuntimeMemoryGb,
       prefillBottleneck: activeResult.prefillBottleneck,
-      decodeBottleneck: activeResult.decodeBottleneck,
-      memoryFitsCapacity: activeResult.memoryFitsCapacity
+      decodeBottleneck: peakResult.decodeBottleneck,
+      memoryFitsCapacity: peakResult.memoryFitsCapacity
     },
-    comparisonRows: buildComparisonRows(activeResult),
+    comparisonRows: buildComparisonRows(activeResult, decodeGeneration),
     memoryBreakdown: [
       {
         key: "weights",
         label: "Weights",
-        valueGb: activeResult.weightGb
+        valueGb: peakResult.weightGb
       },
       {
         key: "persistentDecodeCache",
         label: "Persistent Decode Cache",
-        valueGb: activeResult.cacheGb
+        valueGb: peakResult.cacheGb
       },
       {
         key: "peakTempWorkingSet",
         label: "Peak Temp Working Set",
-        valueGb: activeResult.tmpPeakGb
+        valueGb: peakResult.tmpPeakGb
       },
       {
         key: "runtimeOverhead",
         label: "Runtime Overhead",
-        valueGb: activeResult.overheadGb
+        valueGb: peakResult.overheadGb
       },
       {
         key: "estimatedTotal",
         label: "Estimated Total",
-        valueGb: activeResult.totalRuntimeMemoryGb
+        valueGb: peakResult.totalRuntimeMemoryGb
       }
     ],
     intermediateMetrics: buildIntermediateMetrics(
       model,
       platform,
       workload,
-      activeResult
+      activeResult,
+      decodeGeneration
     ),
-    formulaTrace: buildFormulaTrace(model, workload, activeResult),
-    tokenSweepSeries
+    formulaTrace,
+    tokenSweepSeries,
+    projectionSeries
   };
 }

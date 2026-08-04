@@ -132,10 +132,10 @@ type PlatformInputState = {
 
 默认值建议：
 
-- `computeThroughputTflops = 124`
+- `computeThroughputTflops = 248`（推荐精度标签包含 FP8 的模型）；其他模型默认 `124`
 - `memoryBandwidthGbps = 273`
 - `memoryCapacityGb = 256`
-- `computeEfficiency = 0.8`
+- `computeEfficiency = 0.4`（所有模型统一默认值）
 - `bandwidthEfficiency = 0.6`
 - `batchSize = 1`
 - `precisionAssumptions = "FP8 weights + BF16 activations + FP4 experts"`
@@ -318,7 +318,7 @@ type TokenSweepSeriesPoint = {
 
 结果分析区采用全宽语义分区：
 
-1. 第一行：四张指标卡与内存拆解并排；指标区使用剩余主要宽度，内存拆解保持至少 320px
+1. 第一行：六张指标卡采用两行三列；第一行依次为 `TTFT`、`Prefill TPS`、`Peak Runtime Memory`，第二行集中展示 `Initial Decode TPS`、`Average Decode TPS`、`Decode Time`。内存拆解与指标区并排时保持至少 320px
 2. 第二行：`Prefill / Decode 对比` 独占全宽
 3. 第三行：结构摘要与当前上下文摘要并排，宽度比例约为 58:42，为结构摘要中的长标签和数值预留足够空间。结构摘要沿用紧凑键值格式，显示 Decoder Layers、Hidden Size、Attention Heads、KV Heads、Experts、Active Experts / Token、MoE Intermediate Size 和 Context Limit，数值直接取自当前模型定义
 4. 第四行：Token 趋势图独占全宽
@@ -438,12 +438,11 @@ Prefill/Decode 对比表宽度不足时允许容器内部横向滚动，禁止�
 
 ### Section A: 核心指标卡组
 
-四张卡：
+六张卡，桌面端固定为两行三列：
 
-- `TTFT`
-- `Prefill TPS`
-- `Decode TPS`
-- `Total Runtime Memory`
+- 第一行：`TTFT`、`Prefill TPS`、`Peak Runtime Memory`
+- 第二行：`Initial Decode TPS`、`Average Decode TPS`、`Decode Time`
+- 所有 Decode 吞吐与耗时指标必须集中在第二行；窄屏可按响应式布局降为两列或一列。
 
 每张卡必须显示：
 
@@ -702,7 +701,42 @@ Tab：
 - 跳转时保持当前模型和输入状态
 - 每次成功执行 `计算性能` 后，`模型结构` 与 `公式说明` 页的滚动位置重置到页面顶端
 - 每次成功执行 `计算性能` 后，`公式说明` 页的公式折叠项及小公式变量说明全部恢复为收起状态
+
+## 6.5 Excel 导出
+
+- 性能计算页标题区右上角提供 `导出 Excel` 操作。
+- 导出内容必须基于最近一次成功计算的快照，而不是尚未重新计算的表单草稿。
+- 工作簿至少包含：
+  - Estimate Detail：采用 `Type / Item / Value / Notes (Description / Formula)` 四列纵向明细结构；同一 Type 的单元格纵向合并，并以分组底色区分模型参数、工作负载、平台假设、核心结果、内存、中间量以及 Prefill/Decode/Memory 公式追溯；
+  - Results：Prefill/Decode 对比、内存拆解和中间量；
+  - Formula Trace：Prefill、Decode、Memory 的逐项表达式、求值结果与来源；
+  - Token Trend：完整趋势扫描数据及瓶颈分类。
+  - Prefill Projection：仿照参考明细表的紧凑样式，不再显示额外趋势区；首行为模型的 `Prefill Detail` 标题，随后直接展示 `Context / GFLOPs per Token / TPS@20% / TPS@40% / TTFT(sec)@40%`；标准上下文采用 `1K / 2K / 4K / 8K / 16K / 32K / 64K / 128K`，但不得超过当前 Token Range End；
+  - Decode Projection：仿照 Decode detailed data 横表，包含 `Context / Persistent Cache / Temp Peak / Total Memory / TPS@40% / TPS@60% / TPS@80%`；当前模型未实现 MTP 时不得虚构 MTP 倍率列。
+- Projection 表中的效率情景同时替换 Compute Efficiency 与 Bandwidth Efficiency，并重新取两种 ceiling 的最小值，不能直接对最终 TPS 乘固定倍数。
+- 工作簿必须明确说明这是工程估算快照，Compute/Bandwidth Efficiency 与 Runtime Overhead 属于可校准假设。
+- 数值单元格保留数值类型，单位通过数字格式在同一单元格显示；模型参数来源、权重来源使用可点击链接。
+- 打开工作簿时 `Estimate Detail` 为首个工作表，完整展示结果和估算逻辑；其他工作表保留为专项明细与趋势数据。
+- Web 与 Tauri 均通过浏览器下载机制生成标准 `.xlsx` 文件，不依赖本地安装的 Excel。
+- 性能计算页同时提供 `Export JSON`；JSON 直接由计算快照生成，不从 Excel 反向解析，并包含模型、平台、工作负载、核心结果、Prefill/Decode Projection、中间量、公式追溯和 Token Trend。数值必须保持 JSON number，单位在独立 `units` 字段或语义明确的字段名中表达。
 - 输入校验失败、未实际完成计算时，不重置上述页面状态
+
+## 6.6 Decode 区间与高级估算参数
+
+- `Decode Output Tokens` 必须实际参与 Decode 估算，并满足 `Prompt Length + Decode Output Tokens <= Context Limit`。
+- 结果区分别展示：
+  - `Initial Decode TPS`：Prompt 上下文结束后生成第一个 token 的瞬时吞吐；
+  - `Average Decode TPS`：完整输出区间内，以逐步延迟累加得到的平均吞吐；
+  - `Total Decode Time`：完整生成区间的延迟总和；
+  - `Peak Runtime Memory`：生成全部输出 token 后的最终上下文显存峰值。
+- 超长输出区间最多采样 256 个均匀上下文点估计平均单步延迟；输出不超过 256 tokens 时逐 token 精确累加。
+- `Prefill Cache Traffic Factor` 直接显示在“计算假设”区域，不折叠：
+  - 默认值 `0.10`；
+  - 允许范围 `0–1`；
+  - 用户可手动编辑；
+  - 代入 `B_prefill = B_weights + M_cache × prefill_cache_traffic_factor`。
+- Dense 与 Hybrid 路径的 Attention 临时工作集使用 `Bytes / Activation`，不得将元素字节数写死为 `2`。
+- 公式追溯、中间量、历史记录和 Excel 导出必须包含上述参数与区间结果。
 
 ## 7. 组件清单
 

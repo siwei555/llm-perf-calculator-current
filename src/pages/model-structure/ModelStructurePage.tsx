@@ -353,7 +353,7 @@ export function ModelStructurePage() {
         </p>
       </div>
 
-      <article className="panel model-hero">
+      <article id="structure-model-selection" className="panel model-hero page-section-anchor">
         <div className="model-hero__selector">
           <label className="field">
             <span>模型家族</span>
@@ -399,7 +399,7 @@ export function ModelStructurePage() {
         <MetricStrip model={model} />
       </article>
 
-      <div className="structure-grid">
+      <div id="structure-flow" className="structure-grid page-section-anchor">
         <article className="panel panel--large">
           <h3>结构流图</h3>
           <StructureFlowDiagram model={model} />
@@ -412,7 +412,7 @@ export function ModelStructurePage() {
           </div>
         </article>
 
-        <aside className="module-stack">
+        <aside id="structure-modules" className="module-stack page-section-anchor">
           {model.architectureKind === "hybrid-linear-moe" ||
           model.architectureKind === "hybrid-linear-dense" ? (
             <>
@@ -651,7 +651,7 @@ export function ModelStructurePage() {
         </aside>
       </div>
 
-      <div className="panel-grid">
+      <div id="structure-schedule" className="panel-grid page-section-anchor">
         {model.architectureKind === "hybrid-linear-moe" ||
         model.architectureKind === "hybrid-linear-dense" ? (
           <>
@@ -717,7 +717,9 @@ export function ModelStructurePage() {
         )}
       </div>
 
-      <ParameterTable model={model} />
+      <div id="structure-parameter-links" className="page-section-anchor">
+        <ParameterTable model={model} />
+      </div>
     </section>
   );
 }

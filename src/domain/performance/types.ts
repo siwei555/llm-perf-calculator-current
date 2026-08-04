@@ -18,6 +18,12 @@ export type CalculationStatus =
 export type PerformanceSummary = {
   ttftMs: number;
   prefillTps: number;
+  initialDecodeTps: number;
+  averageDecodeTps: number;
+  decodeTimeMs: number;
+  finalDecodeContext: number;
+  peakRuntimeMemoryGb: number;
+  /** Backward-compatible alias of averageDecodeTps. */
   decodeTps: number;
   totalRuntimeMemoryGb: number;
   prefillBottleneck: BottleneckType;
@@ -70,6 +76,20 @@ export type TokenSweepPoint = {
   decodeBottleneck: BottleneckType;
 };
 
+export type PerformanceProjectionPoint = {
+  contextLength: number;
+  prefillGflopsPerToken: number;
+  prefillTps20: number;
+  prefillTps40: number;
+  prefillTtftSec40: number;
+  persistentCacheGb: number;
+  temporaryMemoryGb: number;
+  totalMemoryGb: number;
+  decodeTps40: number;
+  decodeTps60: number;
+  decodeTps80: number;
+};
+
 export type PerformanceResult = {
   summary: PerformanceSummary;
   comparisonRows: ComparisonRow[];
@@ -77,4 +97,5 @@ export type PerformanceResult = {
   intermediateMetrics: IntermediateMetric[];
   formulaTrace: FormulaTraceSection[];
   tokenSweepSeries: TokenSweepPoint[];
+  projectionSeries: PerformanceProjectionPoint[];
 };
