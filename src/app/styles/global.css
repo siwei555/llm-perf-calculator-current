@@ -354,12 +354,12 @@ h3 {
   gap: 14px;
 }
 
-.export-excel-button {
+.export-report-button {
   flex: 0 0 auto;
   white-space: nowrap;
 }
 
-.export-excel-button:disabled {
+.export-report-button:disabled {
   cursor: wait;
   opacity: 0.68;
 }
@@ -1931,7 +1931,7 @@ h3 {
     flex-direction: column;
   }
 
-  .export-excel-button {
+  .export-report-button {
     align-self: flex-start;
   }
 

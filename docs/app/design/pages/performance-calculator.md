@@ -702,23 +702,24 @@ Tab：
 - 每次成功执行 `计算性能` 后，`模型结构` 与 `公式说明` 页的滚动位置重置到页面顶端
 - 每次成功执行 `计算性能` 后，`公式说明` 页的公式折叠项及小公式变量说明全部恢复为收起状态
 
-## 6.5 Excel 导出
+## 6.5 HTML 报告与 JSON 导出
 
-- 性能计算页标题区右上角提供 `导出 Excel` 操作。
-- 导出内容必须基于最近一次成功计算的快照，而不是尚未重新计算的表单草稿。
-- 工作簿至少包含：
-  - Estimate Detail：采用 `Type / Item / Value / Notes (Description / Formula)` 四列纵向明细结构；同一 Type 的单元格纵向合并，并以分组底色区分模型参数、工作负载、平台假设、核心结果、内存、中间量以及 Prefill/Decode/Memory 公式追溯；
-  - Results：Prefill/Decode 对比、内存拆解和中间量；
-  - Formula Trace：Prefill、Decode、Memory 的逐项表达式、求值结果与来源；
-  - Token Trend：完整趋势扫描数据及瓶颈分类。
-  - Prefill Projection：仿照参考明细表的紧凑样式，不再显示额外趋势区；首行为模型的 `Prefill Detail` 标题，随后直接展示 `Context / GFLOPs per Token / TPS@20% / TPS@40% / TTFT(sec)@40%`；标准上下文采用 `1K / 2K / 4K / 8K / 16K / 32K / 64K / 128K`，但不得超过当前 Token Range End；
-  - Decode Projection：仿照 Decode detailed data 横表，包含 `Context / Persistent Cache / Temp Peak / Total Memory / TPS@40% / TPS@60% / TPS@80%`；当前模型未实现 MTP 时不得虚构 MTP 倍率列。
-- Projection 表中的效率情景同时替换 Compute Efficiency 与 Bandwidth Efficiency，并重新取两种 ceiling 的最小值，不能直接对最终 TPS 乘固定倍数。
-- 工作簿必须明确说明这是工程估算快照，Compute/Bandwidth Efficiency 与 Runtime Overhead 属于可校准假设。
-- 数值单元格保留数值类型，单位通过数字格式在同一单元格显示；模型参数来源、权重来源使用可点击链接。
-- 打开工作簿时 `Estimate Detail` 为首个工作表，完整展示结果和估算逻辑；其他工作表保留为专项明细与趋势数据。
-- Web 与 Tauri 均通过浏览器下载机制生成标准 `.xlsx` 文件，不依赖本地安装的 Excel。
-- 性能计算页同时提供 `Export JSON`；JSON 直接由计算快照生成，不从 Excel 反向解析，并包含模型、平台、工作负载、核心结果、Prefill/Decode Projection、中间量、公式追溯和 Token Trend。数值必须保持 JSON number，单位在独立 `units` 字段或语义明确的字段名中表达。
+- 性能计算页标题区右上角提供 `生成 HTML 报告` 操作，不再提供 Excel 导出。
+- 报告必须基于最近一次成功计算的快照，而不是尚未重新计算的表单草稿。
+- HTML 为 UTF-8、自包含、可离线打开和横向打印的单文件报告，不依赖外部 CSS、JavaScript 或在线资源。
+- 主表采用 `Type / Calculation Layer / Item / Value / Notes (Description / Formula)` 的逻辑，其中 Calculation Layer 与 Item 在页面中合并为一列。
+- `Type` 使用纵向合并和固定颜色表达模型的大运算量板块；板块内逐行列出投影、attention core、卷积、递归扫描等计算层。
+- HTML 报告按 `formulaStrategyId` 选择专用分栏模板，不按模型名称硬编码：
+  - `hybrid-linear-dense`：Model Config、Dense FFN、Full GQA、Gated DeltaNet、Prefill Total；
+  - `hybrid-linear-moe`：Model Config、Active + Shared MoE FFN、Full GQA、Gated DeltaNet、Prefill Total；
+  - `dense-decoder-transformer`：Model Config、Dense FFN、Sliding-window Attention、Full Attention、Prefill Total；
+  - `dense-decoder-moe`：Model Config、Active + Shared MoE FFN、Sliding-window Attention、Full Attention、Prefill Total；
+  - `deepseek-v4-compressed-moe`：Model Config、Sparse MoE FFN、Sliding Attention、CSA、HCA、Prefill Total；CSA 块内必须列出 Compressor 与 Indexer，HCA 块内必须列出 Compressor。
+- Qwen3.6-27B-FP8 使用 Dense FFN 口径；Qwen3.6-35B-A3B 及 FP8 版本使用每 token 激活 routed experts 加 shared expert 的 MoE 口径。不得用 routed experts 总数冒充实际计算专家数。
+- Projection 行展示单层、单 token 理论 FLOPs；块汇总按模型注册表中的实际层数累加；Full Attention core 使用当前成功计算快照的 Prompt Token Length。
+- 报告显式声明其为理论工程估算而非实测数据，并展示模型、Prompt Length、Prefill TPS、TTFT、导出时间和公式策略。
+- 新增公式策略时必须同步新增 HTML 专用模板；未知策略应显式报错，不能静默套用不匹配的通用表格。
+- 性能计算页同时保留 `导出 JSON`；JSON 直接由计算快照生成，并包含模型、平台、工作负载、核心结果、Prefill/Decode Projection、中间量、公式追溯和 Token Trend。数值必须保持 JSON number，单位在独立 `units` 字段或语义明确的字段名中表达。
 - 输入校验失败、未实际完成计算时，不重置上述页面状态
 
 ## 6.6 Decode 区间与高级估算参数
@@ -736,7 +737,7 @@ Tab：
   - 用户可手动编辑；
   - 代入 `B_prefill = B_weights + M_cache × prefill_cache_traffic_factor`。
 - Dense 与 Hybrid 路径的 Attention 临时工作集使用 `Bytes / Activation`，不得将元素字节数写死为 `2`。
-- 公式追溯、中间量、历史记录和 Excel 导出必须包含上述参数与区间结果。
+- 公式追溯、中间量、历史记录、HTML 报告和 JSON 导出必须包含与各自用途相关的上述参数与区间结果。
 
 ## 7. 组件清单
 

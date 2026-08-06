@@ -10,7 +10,7 @@ import { useCalculatorContext } from "../../features/performance-calculator/stat
 import { getModelDefinition } from "../../engines/model-registry";
 
 export function PerformanceCalculatorPage() {
-  const [exportStatus, setExportStatus] = useState<"idle" | "exporting" | "success" | "error">("idle");
+  const [reportExportStatus, setReportExportStatus] = useState<"idle" | "exporting" | "success" | "error">("idle");
   const [jsonExportStatus, setJsonExportStatus] = useState<"idle" | "exporting" | "success" | "error">("idle");
   const {
     state,
@@ -49,22 +49,22 @@ export function PerformanceCalculatorPage() {
           ? "结果已更新"
           : "待计算";
 
-  const exportExcel = async () => {
-    setExportStatus("exporting");
+  const exportHtmlReport = async () => {
+    setReportExportStatus("exporting");
     try {
-      const { exportPerformanceWorkbook } = await import(
-        "../../features/performance-calculator/services/performanceExcelExporter"
+      const { exportPerformanceHtmlReport } = await import(
+        "../../features/performance-calculator/services/performanceHtmlReporter"
       );
-      await exportPerformanceWorkbook({
+      exportPerformanceHtmlReport({
         model: calculatedModel,
         snapshot: calculationSnapshot,
         result
       });
-      setExportStatus("success");
-      window.setTimeout(() => setExportStatus("idle"), 2500);
+      setReportExportStatus("success");
+      window.setTimeout(() => setReportExportStatus("idle"), 2500);
     } catch (error) {
-      console.error("Failed to export performance workbook", error);
-      setExportStatus("error");
+      console.error("Failed to export performance HTML report", error);
+      setReportExportStatus("error");
     }
   };
 
@@ -100,22 +100,22 @@ export function PerformanceCalculatorPage() {
           </p>
           <button
             type="button"
-            className="secondary-button export-excel-button"
-            onClick={exportExcel}
-            disabled={exportStatus === "exporting"}
-            title="导出最近一次成功计算的结果、输入假设、公式追溯和趋势数据"
+            className="secondary-button export-report-button"
+            onClick={exportHtmlReport}
+            disabled={reportExportStatus === "exporting"}
+            title="导出最近一次成功计算的分块理论计算 HTML 报告"
           >
-            {exportStatus === "exporting"
-              ? "正在导出…"
-              : exportStatus === "success"
-                ? "已导出 Excel"
-                : exportStatus === "error"
+            {reportExportStatus === "exporting"
+              ? "正在生成…"
+              : reportExportStatus === "success"
+                ? "已生成 HTML 报告"
+                : reportExportStatus === "error"
                   ? "导出失败，请重试"
-                  : "导出 Excel"}
+                  : "生成 HTML 报告"}
           </button>
           <button
             type="button"
-            className="secondary-button export-excel-button"
+            className="secondary-button export-report-button"
             onClick={exportJson}
             disabled={jsonExportStatus === "exporting"}
             title="导出最近一次成功计算的结构化 JSON 快照"

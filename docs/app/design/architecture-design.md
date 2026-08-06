@@ -178,6 +178,16 @@ active-expert带宽口径。当前对应模型为`Qwen/Qwen3.6-27B-FP8`，
 
 - `src/features/performance-calculator/services/performanceCalculator.ts`
 
+HTML 理论计算报告由
+`src/features/performance-calculator/services/performanceHtmlReporter.ts`
+直接根据 `ModelDefinition + CalculationSnapshot + PerformanceResult` 生成。
+报告按 `formulaStrategyId` 穷举选择专用分块模板：hybrid-linear 模板按
+Dense/MoE FFN、Full GQA、Gated DeltaNet 拆分；dense-decoder 模板按
+Dense/MoE FFN、Sliding-window Attention、Full Attention 拆分；DeepSeek V4
+compressed-MoE 模板按 Sparse MoE、Sliding、CSA、HCA 拆分，并在对应块中
+展示 Compressor 和 Indexer。未知策略直接报错，防止套用错误算子口径。
+报告为自包含 HTML，不依赖 ExcelJS。
+
 该策略包含：
 
 - DeepSeek V4 compressed attention schedule

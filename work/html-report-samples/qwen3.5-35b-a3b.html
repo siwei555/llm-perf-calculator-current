@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Derivation of Theoretical Compute for Qwen3.5-35B-A3B Prefill</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; color: #17243a; background: #eef2f7; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px; }
+    main { max-width: 1480px; margin: 0 auto; padding: 34px; background: #fff; box-shadow: 0 18px 60px rgba(23,36,58,.12); }
+    h1 { margin: 0; padding-bottom: 14px; color: #1557a6; font-size: clamp(24px, 3vw, 38px); border-bottom: 3px solid #3971ad; }
+    .meta { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin: 22px 0; }
+    .meta div { padding: 12px 14px; background: #f7f9fc; border: 1px solid #d7dfea; border-radius: 8px; }
+    .meta span { display: block; color: #64748b; font-size: 12px; }
+    .meta strong { display: block; margin-top: 4px; font-size: 15px; overflow-wrap: anywhere; }
+    .report-note { margin: 0 0 18px; padding: 12px 14px; color: #475569; background: #eff6ff; border-left: 4px solid #2563eb; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+    col.type { width: 19%; } col.item { width: 25%; } col.value { width: 18%; } col.notes { width: 38%; }
+    th, td { padding: 8px 10px; border: 1px solid #aeb8c6; vertical-align: middle; }
+    thead th { color: #fff; background: #17243a; text-align: center; }
+    .group-cell { text-align: center; white-space: normal; font-size: 14px; }
+    .item-cell { text-align: left; }
+    .value-cell { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+    .notes-cell { color: #334155; }
+    .tone-config .group-cell, .tone-config .item-cell { background: #e8edf3; }
+    .tone-config .value-cell { background: #f4f6f9; }
+    .tone-ffn .group-cell, .tone-ffn .item-cell { background: #bfdbfe; }
+    .tone-ffn .value-cell { background: #dbeafe; }
+    .tone-full .group-cell, .tone-full .item-cell { background: #f59e0b; color: #2d2108; }
+    .tone-full .value-cell { background: #fef3c7; }
+    .tone-sliding .group-cell, .tone-sliding .item-cell { background: #38bdf8; color: #082f49; }
+    .tone-sliding .value-cell { background: #e0f2fe; }
+    .tone-linear .group-cell, .tone-linear .item-cell { background: #84cc16; color: #18310a; }
+    .tone-linear .value-cell { background: #dcfce7; }
+    .tone-compressed .group-cell, .tone-compressed .item-cell { background: #fb923c; color: #431407; }
+    .tone-compressed .value-cell { background: #ffedd5; }
+    .tone-indexer .group-cell, .tone-indexer .item-cell { background: #a78bfa; color: #2e1065; }
+    .tone-indexer .value-cell { background: #ede9fe; }
+    .tone-result .group-cell, .tone-result .item-cell { color: #fff; background: #1557a6; }
+    .tone-result .value-cell { color: #0f3d73; background: #dbeafe; }
+    .tone-trace .group-cell, .tone-trace .item-cell { background: #e9d5ff; }
+    .tone-trace .value-cell { background: #f3e8ff; }
+    footer { margin-top: 18px; color: #64748b; font-size: 12px; }
+    @media (max-width: 900px) { body { padding: 0; } main { padding: 18px; } .meta { grid-template-columns: 1fr 1fr; } table { font-size: 11px; } th,td { padding: 6px; } }
+    @media print { @page { size: A4 landscape; margin: 10mm; } body { padding: 0; background: #fff; } main { max-width: none; padding: 0; box-shadow: none; } tr { break-inside: avoid; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Derivation of Theoretical Compute for Qwen3.5-35B-A3B Prefill</h1>
+  <section class="meta" aria-label="计算快照">
+    <div><span>Model</span><strong>Qwen3.5-35B-A3B</strong></div>
+    <div><span>Prompt Length</span><strong>131,072 tokens</strong></div>
+    <div><span>Prefill TPS / TTFT</span><strong>6,358.1 tokens/s · 20,614.98 ms</strong></div>
+    <div><span>Exported At</span><strong>2026/8/5 08:00:00</strong></div>
+  </section>
+  <p class="report-note">颜色分块表示该模型的主要运算模块；表内数值基于最近一次成功计算的模型与 Prompt 快照。Projection 行为单层、单 token 理论 FLOPs，块汇总按实际层数累加；这不是实测性能数据。</p>
+  <table>
+    <colgroup><col class="type"><col class="item"><col class="value"><col class="notes"></colgroup>
+    <thead><tr><th>Type</th><th>Calculation Layer / Item</th><th>Value</th><th>Notes (Description / Formula)</th></tr></thead>
+    <tbody><tr class="tone-config">
+            <th class="group-cell" rowspan="12">Model Config</th>
+            <th class="item-cell">hidden_size H</th>
+            <td class="value-cell">2,048</td>
+            <td class="notes-cell">模型隐藏维度</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">num_layers</th>
+            <td class="value-cell">40</td>
+            <td class="notes-cell">Decoder 总层数</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">full_attn_layers</th>
+            <td class="value-cell">10</td>
+            <td class="notes-cell">Full GQA 层数</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">linear_attn_layers</th>
+            <td class="value-cell">30</td>
+            <td class="notes-cell">Gated DeltaNet 层数</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">attn_heads</th>
+            <td class="value-cell">16</td>
+            <td class="notes-cell">Query attention heads</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">head_dim</th>
+            <td class="value-cell">256</td>
+            <td class="notes-cell">Full attention 单头维度</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">kv_heads</th>
+            <td class="value-cell">2</td>
+            <td class="notes-cell">Full GQA 的 K/V heads</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">intermediate_size</th>
+            <td class="value-cell">512</td>
+            <td class="notes-cell">单个专家中间维度</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">routed_experts</th>
+            <td class="value-cell">256</td>
+            <td class="notes-cell">每层 routed experts 总数</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">active_experts / token</th>
+            <td class="value-cell">8</td>
+            <td class="notes-cell">每 token 激活的 routed experts，不含 shared expert</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">shared_experts</th>
+            <td class="value-cell">1</td>
+            <td class="notes-cell">每 token 同时执行的 shared expert</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">prefill_tokens N</th>
+            <td class="value-cell">131,072</td>
+            <td class="notes-cell">本报告使用的 Prompt Token Length</td>
+          </tr>
+<tr class="tone-ffn">
+            <th class="group-cell" rowspan="5">MoE FFN<br>(active experts, every layer)</th>
+            <th class="item-cell">Gate projection / layer / token</th>
+            <td class="value-cell">0.0189 GFLOPs</td>
+            <td class="notes-cell">2 × H × I × 9</td>
+          </tr>
+<tr class="tone-ffn">
+            
+            <th class="item-cell">Up projection / layer / token</th>
+            <td class="value-cell">0.0189 GFLOPs</td>
+            <td class="notes-cell">2 × H × I × 9</td>
+          </tr>
+<tr class="tone-ffn">
+            
+            <th class="item-cell">Down projection / layer / token</th>
+            <td class="value-cell">0.0189 GFLOPs</td>
+            <td class="notes-cell">2 × H × I × 9</td>
+          </tr>
+<tr class="tone-ffn">
+            
+            <th class="item-cell">FFN total / layer / token</th>
+            <td class="value-cell">0.0566 GFLOPs</td>
+            <td class="notes-cell">6 × H × I × 9</td>
+          </tr>
+<tr class="tone-ffn">
+            
+            <th class="item-cell">FFN total / token</th>
+            <td class="value-cell">2.2649 GFLOPs</td>
+            <td class="notes-cell">FFN / layer / token × 40 layers</td>
+          </tr>
+<tr class="tone-full">
+            <th class="group-cell" rowspan="7">Gated Attention<br>(Full GQA)</th>
+            <th class="item-cell">Project Q + Gate / layer / token</th>
+            <td class="value-cell">0.0336 GFLOPs</td>
+            <td class="notes-cell">2 × H × (2 × attn_heads × head_dim)</td>
+          </tr>
+<tr class="tone-full">
+            
+            <th class="item-cell">Project K / layer / token</th>
+            <td class="value-cell">0.0021 GFLOPs</td>
+            <td class="notes-cell">2 × H × kv_heads × head_dim</td>
+          </tr>
+<tr class="tone-full">
+            
+            <th class="item-cell">Project V / layer / token</th>
+            <td class="value-cell">0.0021 GFLOPs</td>
+            <td class="notes-cell">2 × H × kv_heads × head_dim</td>
+          </tr>
+<tr class="tone-full">
+            
+            <th class="item-cell">Project O / layer / token</th>
+            <td class="value-cell">0.0168 GFLOPs</td>
+            <td class="notes-cell">2 × attn_heads × head_dim × H</td>
+          </tr>
+<tr class="tone-full">
+            
+            <th class="item-cell">QKᵀ + AV / layer / token</th>
+            <td class="value-cell">1.0737 GFLOPs</td>
+            <td class="notes-cell">2 × N × attn_heads × head_dim；按 causal prefill 口径</td>
+          </tr>
+<tr class="tone-full">
+            
+            <th class="item-cell">Full attention total / layer / token</th>
+            <td class="value-cell">1.1283 GFLOPs</td>
+            <td class="notes-cell">Q/Gate + K + V + O + attention core</td>
+          </tr>
+<tr class="tone-full">
+            
+            <th class="item-cell">Full attention total / token</th>
+            <td class="value-cell">11.2827 GFLOPs</td>
+            <td class="notes-cell">Full attention / layer / token × 10 layers</td>
+          </tr>
+<tr class="tone-linear">
+            <th class="group-cell" rowspan="8">Gated DeltaNet Attention<br>(Linear Attention)</th>
+            <th class="item-cell">in_proj_qkv / layer / token</th>
+            <td class="value-cell">0.0336 GFLOPs</td>
+            <td class="notes-cell">2 × H × (2 × key_dim + value_dim)</td>
+          </tr>
+<tr class="tone-linear">
+            
+            <th class="item-cell">in_proj_z / layer / token</th>
+            <td class="value-cell">0.0168 GFLOPs</td>
+            <td class="notes-cell">2 × H × value_dim</td>
+          </tr>
+<tr class="tone-linear">
+            
+            <th class="item-cell">in_proj_a + in_proj_b / layer / token</th>
+            <td class="value-cell">0.0003 GFLOPs</td>
+            <td class="notes-cell">2 × H × (2 × value_heads)</td>
+          </tr>
+<tr class="tone-linear">
+            
+            <th class="item-cell">Depthwise Conv1D / layer / token</th>
+            <td class="value-cell">0.0001 GFLOPs</td>
+            <td class="notes-cell">2 × kernel × conv_dim</td>
+          </tr>
+<tr class="tone-linear">
+            
+            <th class="item-cell">Gated delta rule / layer / token</th>
+            <td class="value-cell">0.001 GFLOPs</td>
+            <td class="notes-cell">2 × value_heads × key_head_dim × value_head_dim</td>
+          </tr>
+<tr class="tone-linear">
+            
+            <th class="item-cell">Output projection / layer / token</th>
+            <td class="value-cell">0.0168 GFLOPs</td>
+            <td class="notes-cell">2 × value_dim × H</td>
+          </tr>
+<tr class="tone-linear">
+            
+            <th class="item-cell">Linear attention total / layer / token</th>
+            <td class="value-cell">0.0685 GFLOPs</td>
+            <td class="notes-cell">Input projections + Conv1D + delta scan + output projection</td>
+          </tr>
+<tr class="tone-linear">
+            
+            <th class="item-cell">Linear attention total / token</th>
+            <td class="value-cell">2.0546 GFLOPs</td>
+            <td class="notes-cell">Linear attention / layer / token × 30 layers</td>
+          </tr>
+<tr class="tone-result">
+            <th class="group-cell" rowspan="2">Prefill Total</th>
+            <th class="item-cell">Theoretical compute / token</th>
+            <td class="value-cell">15.6022 GFLOPs</td>
+            <td class="notes-cell">FFN + Full GQA + Gated DeltaNet</td>
+          </tr>
+<tr class="tone-result">
+            
+            <th class="item-cell">Theoretical compute / request</th>
+            <td class="value-cell">2,045.006 TFLOPs</td>
+            <td class="notes-cell">Theoretical compute / token × N</td>
+          </tr></tbody>
+  </table>
+  <footer>Generated locally by LLM Perf Calculator. Formula strategy: hybrid-linear-moe.</footer>
+</main>
+</body>
+</html>
