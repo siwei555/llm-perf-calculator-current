@@ -15,6 +15,7 @@
 | **Qwen3.5** | Qwen3.5-35B-A3B | Hybrid (Gated DeltaNet + Full GQA + MoE) | 35B / 3B active |
 | **Qwen3.6** | Qwen/Qwen3.6-35B-A3B | Hybrid (Gated DeltaNet + Full GQA + MoE) | 35B / 3B active |
 | | Qwen/Qwen3.6-35B-A3B-FP8 | Hybrid (Gated DeltaNet + Full GQA + MoE), FP8 weights | 35B / 3B active |
+| | Qwen/Qwen3.6-27B-FP8 | Hybrid (Gated DeltaNet + Full GQA + Dense SwiGLU), FP8 weights | 27B |
 
 ## 技术栈
 
@@ -32,6 +33,8 @@
 - **瓶颈分析**：Compute-bound vs Bandwidth-bound 判定
 - **公式追溯**：每项结果均可追溯到输入参数 → 中间量 → 公式
 - **模型结构**：模型超参速查、层 schedule、结构流图
+- **HTML 报告**：按模型实际架构和算子分块导出理论计算推导报告
+- **JSON 导出**：导出完整模型、平台、负载、结果、公式和趋势快照
 - **桌面应用**：Tauri 打包为跨平台桌面 App
 
 ## 项目结构
@@ -218,6 +221,8 @@ npm run desktop:build:linux
 
 ## 使用方式
 
+完整操作说明参见 [LLM Perf Calculator 使用说明](docs/app/user-guide.md)。
+
 ### 1. 性能计算
 
 1. 在左侧导航选择 **性能计算**
@@ -228,7 +233,8 @@ npm run desktop:build:linux
    - **显存容量**（GB）
    - **精度配置**：Bytes/Weight、Bytes/Activation、Bytes/Expert
 4. 设置 Token 范围（Prefill 长度、Decode 上下文、输出长度、趋势范围）
-5. 点击 **开始计算**
+5. 点击 **计算性能**
+6. 需要归档时点击 **生成 HTML 报告** 或 **导出 JSON**
 
 ### 2. 模型结构
 
@@ -286,6 +292,7 @@ bandwidth_ceiling = effective_bandwidth / bytes_per_token
 - [主设计文档](docs/app/design/app-design-spec.md)
 - [架构设计文档](docs/app/design/architecture-design.md)
 - [性能计算页设计](docs/app/design/pages/performance-calculator.md)
+- [用户使用说明](docs/app/user-guide.md)
 - [模型结构页设计](docs/app/design/pages/model-structure.md)
 - [公式说明页设计](docs/app/design/pages/formula-notes.md)
 
