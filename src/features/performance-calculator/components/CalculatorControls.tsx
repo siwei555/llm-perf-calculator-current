@@ -217,7 +217,10 @@ export function CalculatorControls({
               <FieldError message={validationErrors.tokenRangeStep} />
             </label>
           </div>
-          <h4 className="input-section-title input-section-title--quick">快捷输入</h4>
+          <div className="quick-input-heading">
+            <h4 className="input-section-title input-section-title--quick">快捷输入</h4>
+            <small>点击目标输入框即可切换快捷输入目标</small>
+          </div>
           <p className="quick-input-target">
             当前输入目标：<strong>{quickInputLabels[quickInputTarget]}</strong>
           </p>

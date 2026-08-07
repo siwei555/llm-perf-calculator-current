@@ -42,11 +42,21 @@ function formatMetricValue(metric: TrendMetricKey, value: number) {
   return `${value.toFixed(2)} tokens/s`;
 }
 
-function formatAxisTick(metric: TrendMetricKey, value: number) {
-  if (metric === "ttftMs") return (value / 1000).toFixed(1);
-  if (metric === "totalRuntimeMemoryGb") return value.toFixed(1);
-  if (value >= 1000) return `${(value / 1000).toFixed(0)}K`;
-  return value.toFixed(0);
+function adaptiveFractionDigits(range: number) {
+  if (!Number.isFinite(range) || range <= 0) return 2;
+  return Math.max(0, Math.min(4, Math.ceil(-Math.log10(range / 3))));
+}
+
+function formatAxisTick(metric: TrendMetricKey, value: number, range: number) {
+  const displayValue = metric === "ttftMs" ? value / 1000 : value;
+  const displayRange = metric === "ttftMs" ? range / 1000 : range;
+  const digits = adaptiveFractionDigits(displayRange);
+
+  if (metric !== "ttftMs" && metric !== "totalRuntimeMemoryGb" && displayValue >= 1000) {
+    return `${(displayValue / 1000).toFixed(adaptiveFractionDigits(displayRange / 1000))}K`;
+  }
+
+  return displayValue.toFixed(digits);
 }
 
 function getMetricUnit(metric: TrendMetricKey) {
@@ -60,11 +70,16 @@ function getMetricLabel(metric: TrendMetricKey) {
 }
 
 function getYDomain(values: number[]) {
-  const minValue = Math.min(...values);
-  const maxValue = Math.max(...values);
+  const finiteValues = values.filter(Number.isFinite);
+  if (finiteValues.length === 0) {
+    return [0, 1] as const;
+  }
+
+  const minValue = Math.min(...finiteValues);
+  const maxValue = Math.max(...finiteValues);
   if (minValue === maxValue) {
-    const pad = Math.max(Math.abs(minValue) * 0.1, 1);
-    return [minValue - pad, maxValue + pad] as const;
+    const pad = Math.abs(minValue) > 0 ? Math.abs(minValue) * 0.1 : 0.1;
+    return [Math.max(0, minValue - pad), maxValue + pad] as const;
   }
   const pad = (maxValue - minValue) * 0.08;
   return [Math.max(0, minValue - pad), maxValue + pad] as const;
@@ -103,7 +118,7 @@ function SingleTrendChart({
   const xMin = points[0]?.tokenLength ?? 0;
   const xMax = points[points.length - 1]?.tokenLength ?? xMin + 1;
   const xRange = Math.max(xMax - xMin, 1);
-  const yRange = Math.max(yMax - yMin, 1);
+  const yRange = Math.max(yMax - yMin, Number.EPSILON);
   const xScale = (t: number) => PLOT.left + ((t - xMin) / xRange) * plotWidth();
   const yScale = (v: number) => PLOT.top + plotHeight() - ((v - yMin) / yRange) * plotHeight();
 
@@ -129,7 +144,7 @@ function SingleTrendChart({
             <g key={`y-${tick}`}>
               <line x1={PLOT.left} x2={PLOT.left + plotWidth()} y1={y} y2={y} stroke="rgba(15, 23, 42, 0.08)" />
               <text x={PLOT.left - 10} y={y + 4} textAnchor="end" className="chart-axis-text">
-                {formatAxisTick(metric, tick)}
+                {formatAxisTick(metric, tick, yRange)}
               </text>
             </g>
           );

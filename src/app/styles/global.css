@@ -653,7 +653,20 @@ h3 {
 }
 
 .input-section-title--quick {
-  margin-bottom: 6px;
+  margin: 0;
+}
+
+.quick-input-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  margin: 26px 0 6px;
+}
+
+.quick-input-heading small {
+  color: var(--text-subtle);
+  font-size: 0.78rem;
 }
 
 .quick-input-target {
