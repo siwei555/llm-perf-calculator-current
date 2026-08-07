@@ -13,9 +13,8 @@
 | **Gemma 4** | Gemma-4-12B-it | Dense Decoder (GQA/MQA + GeGLU) | 11.9B |
 | | google/gemma-4-26B-A4B-it | Dense Decoder MoE (Sliding/Full + routed MoE) | 26B / A4B |
 | **Qwen3.5** | Qwen3.5-35B-A3B | Hybrid (Gated DeltaNet + Full GQA + MoE) | 35B / 3B active |
-| **Qwen3.6** | Qwen/Qwen3.6-35B-A3B | Hybrid (Gated DeltaNet + Full GQA + MoE) | 35B / 3B active |
-| | Qwen/Qwen3.6-35B-A3B-FP8 | Hybrid (Gated DeltaNet + Full GQA + MoE), FP8 weights | 35B / 3B active |
-| | Qwen/Qwen3.6-27B-FP8 | Hybrid (Gated DeltaNet + Full GQA + Dense SwiGLU), FP8 weights | 27B |
+| **Qwen3.6** | Qwen3.6-27B | Hybrid (Gated DeltaNet + Full GQA + Dense SwiGLU) | 27B |
+| | Qwen3.6-35B-A3B | Hybrid (Gated DeltaNet + Full GQA + MoE) | 35B / 3B active |
 
 ## 技术栈
 
@@ -234,7 +233,7 @@ npm run desktop:build:linux
    - **精度配置**：Bytes/Weight、Bytes/Activation、Bytes/Expert
 4. 设置 Token 范围（Prefill 长度、Decode 上下文、输出长度、趋势范围）
 5. 点击 **计算性能**
-6. 需要归档时点击 **生成 HTML 报告** 或 **导出 JSON**
+6. 点击 **打开 HTML 报告** 在新页面查看推导结果，或点击 **导出 JSON** 保存结构化快照
 
 ### 2. 模型结构
 

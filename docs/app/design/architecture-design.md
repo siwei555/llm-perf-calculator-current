@@ -156,14 +156,14 @@ type ModelDefinition = {
 - `hybrid-linear-moe`
 - `hybrid-linear-dense`
 
-`Qwen/Qwen3.6-35B-A3B` 使用 `hybrid-linear-moe`，不得按普通 GQA
+`Qwen3.6-35B-A3B` 使用 `hybrid-linear-moe`，不得按普通 GQA
 decoder 或纯线性注意力模型计算。策略按 10 个 Full GQA 层与 30 个
 Gated DeltaNet 层分别计算后汇总；MoE 项按 8 个 routed experts 加
 1 个 shared expert 计算。持久缓存由 Full GQA KV cache 与线性层
 conv/recurrent state 共同组成。模型事实、来源和 128K 验收基线记录在
 `data/models/Qwen_3.6/Qwen3.6-35B-A3B.json`。
 
-FP8 checkpoint 仍复用该策略。量化只通过模型级推荐精度影响权重
+FP8 checkpoint 仍复用该策略，但不作为独立逻辑模型注册。量化只通过平台精度配置影响权重
 显存和带宽流量：weights/expert weights 为 1 byte，activation 与
 Full KV cache 为 2 bytes，Gated DeltaNet recurrent state 仍按 FP32。
 其已确认事实源为
@@ -171,7 +171,7 @@ Full KV cache 为 2 bytes，Gated DeltaNet recurrent state 仍按 FP32。
 
 `hybrid-linear-dense`复用Full GQA和Gated DeltaNet的attention计算，
 但每层FFN使用`6·S·D·I`的dense SwiGLU公式，不使用专家、top-k或
-active-expert带宽口径。当前对应模型为`Qwen/Qwen3.6-27B-FP8`，
+active-expert带宽口径。当前对应逻辑模型为`Qwen3.6-27B`，
 事实源为`data/models/Qwen_3.6/Qwen3.6-27B-FP8.json`。
 
 当前计算实现位置：

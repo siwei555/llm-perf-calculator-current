@@ -207,6 +207,6 @@ FP8版本的公式操作数与Base相同；公式说明需要额外标注E4M3动
 为FP32。详细依据见
 `docs/Qwen_3.6/Qwen3.6-35B-A3B-FP8.md`。
 
-`Qwen/Qwen3.6-27B-FP8`的Prefill追溯必须把Full GQA、Gated DeltaNet
+`Qwen3.6-27B`的Prefill追溯必须把Full GQA、Gated DeltaNet
 和Dense SwiGLU分开；Decode追溯使用全部dense权重流量，不显示active
 expert fraction。详细依据见`docs/Qwen_3.6/Qwen3.6-27B-FP8.md`。

@@ -704,9 +704,9 @@ Tab：
 
 ## 6.5 HTML 报告与 JSON 导出
 
-- 性能计算页标题区右上角提供 `生成 HTML 报告` 操作，不再提供 Excel 导出。
+- 性能计算页标题区右上角提供 `打开 HTML 报告` 操作，不再提供 Excel 导出或自动下载 HTML 文件。
 - 报告必须基于最近一次成功计算的快照，而不是尚未重新计算的表单草稿。
-- HTML 为 UTF-8、自包含、可离线打开和横向打印的单文件报告，不依赖外部 CSS、JavaScript 或在线资源。
+- HTML 为 UTF-8、自包含的新页面报告，不依赖外部 CSS、JavaScript 或在线资源；支持浏览器横向打印和按需另存网页。
 - 主表采用 `Type / Calculation Layer / Item / Value / Notes (Description / Formula)` 的逻辑，其中 Calculation Layer 与 Item 在页面中合并为一列。
 - `Type` 使用纵向合并和固定颜色表达模型的大运算量板块；板块内逐行列出投影、attention core、卷积、递归扫描等计算层。
 - HTML 报告按 `formulaStrategyId` 选择专用分栏模板，不按模型名称硬编码：
@@ -715,7 +715,7 @@ Tab：
   - `dense-decoder-transformer`：Model Config、Dense FFN、Sliding-window Attention、Full Attention、Prefill Total；
   - `dense-decoder-moe`：Model Config、Active + Shared MoE FFN、Sliding-window Attention、Full Attention、Prefill Total；
   - `deepseek-v4-compressed-moe`：Model Config、Sparse MoE FFN、Sliding Attention、CSA、HCA、Prefill Total；CSA 块内必须列出 Compressor 与 Indexer，HCA 块内必须列出 Compressor。
-- Qwen3.6-27B-FP8 使用 Dense FFN 口径；Qwen3.6-35B-A3B 及 FP8 版本使用每 token 激活 routed experts 加 shared expert 的 MoE 口径。不得用 routed experts 总数冒充实际计算专家数。
+- Qwen3.6-27B 使用 Dense FFN 口径；Qwen3.6-35B-A3B 使用每 token 激活 routed experts 加 shared expert 的 MoE 口径。FP8 作为平台精度配置，不单独注册成模型；不得用 routed experts 总数冒充实际计算专家数。
 - Projection 行展示单层、单 token 理论 FLOPs；块汇总按模型注册表中的实际层数累加；Full Attention core 使用当前成功计算快照的 Prompt Token Length。
 - 报告显式声明其为理论工程估算而非实测数据，并展示模型、Prompt Length、Prefill TPS、TTFT、导出时间和公式策略。
 - 新增公式策略时必须同步新增 HTML 专用模板；未知策略应显式报错，不能静默套用不匹配的通用表格。
@@ -817,12 +817,12 @@ weights / experts / activations 下，公式策略必须得到：
 公式追溯必须分别列出 Full GQA、Gated DeltaNet、MoE、Full KV cache
 与线性 recurrent state，不能只显示聚合总量。
 
-FP8 版本在相同128K、Batch 1场景下的理论FLOPs保持不变，默认权重
-显存为 `34.660 GB`、active weight traffic 为 `3.311 GB/token`、
-运行时总显存为约 `43.557 GB`。页面切换至FP8模型时必须自动应用
-1/2/1 bytes（weight/activation/expert），不得继承Base的2/2/2配置。
+Qwen3.6-35B-A3B 在相同128K、Batch 1场景下切换为 FP8 平台精度配置时，
+理论FLOPs保持不变；权重显存为 `34.660 GB`、active weight traffic 为
+`3.311 GB/token`、运行时总显存约为 `43.557 GB`。FP8 不作为独立模型；
+用户按平台参数区建议手动应用 1/2/1 bytes（weight/activation/expert）。
 
-`Qwen/Qwen3.6-27B-FP8`使用独立的`hybrid-linear-dense`策略。128K、
+`Qwen3.6-27B`使用独立的`hybrid-linear-dense`策略。128K、
 Batch 1验收值为Prefill `9771.463 TFLOPs`、Decode
 `100.320 GFLOPs/token`、权重流量`27.000 GB/token`及运行时总显存
 `42.966 GB`。切换模型后自动应用1/2 bytes（weight/activation）。

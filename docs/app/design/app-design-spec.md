@@ -50,19 +50,16 @@
    - `google/gemma-4-26B-A4B-it`
 7. 当前已扩展支持 `Qwen3.5` 与 `Qwen3.6` hybrid-linear-MoE family：
    - `Qwen3.5-35B-A3B`
-   - `Qwen/Qwen3.6-35B-A3B`
-   - `Qwen/Qwen3.6-35B-A3B-FP8`
-   - `Qwen/Qwen3.6-27B-FP8`
-   - `Qwen/Qwen3.6-35B-A3B` 的已确认工程事实源为
+   - `Qwen3.6-27B`
+   - `Qwen3.6-35B-A3B`
+   - Qwen3.6 模型列表只表示逻辑模型，不把 FP8 checkpoint 单独注册为一个模型；FP8 作为平台精度配置提供建议值。
+   - `Qwen3.6-35B-A3B` 的已确认工程事实源为
      `data/models/Qwen_3.6/Qwen3.6-35B-A3B.json`；其结构为 40 层
      hybrid decoder（10 层 Full GQA + 30 层 Gated DeltaNet）、
      256 routed experts、每 token 激活 8 个专家并带 1 个 shared expert。
      Base 版本默认使用 BF16 weights / experts / activations。
-   - `Qwen/Qwen3.6-35B-A3B-FP8` 与 Base 共享相同结构和理论 FLOPs；
-     推荐精度为 FP8 weights / FP8 experts / BF16 activations。默认权重
-     显存采用文本 decoder 简化口径 `34.660 GB`，不把 KV cache 或
-     recurrent state 错误地按 FP8 计算。
-- `Qwen/Qwen3.6-27B-FP8` 是 `hybrid-linear-dense`，共有 64 个
+   - Qwen3.6-35B-A3B 评估 FP8 量化时建议使用 FP8 weights / experts 与 BF16 activations；该精度配置不改变模型结构和理论 FLOPs。
+- `Qwen3.6-27B` 是 `hybrid-linear-dense`，共有 64 个
   Decoder 层，其中包含 48 层 Gated DeltaNet、16 层 Full GQA；全部 64 层
   均包含 dense SwiGLU FFN。它没有
      routed experts。推荐精度为FP8 weights / BF16 activations。

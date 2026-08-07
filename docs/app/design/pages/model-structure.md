@@ -180,12 +180,12 @@ input_ids
 
 ## 10. Qwen3.6-35B-A3B 展示规则
 
-选择 `Qwen/Qwen3.6-35B-A3B` 时，结构页必须从模型定义展示 40 个
+选择 `Qwen3.6-35B-A3B` 时，结构页必须从模型定义展示 40 个
 decoder layers、hidden size 2048、16 attention heads、2 KV heads、
 256 routed experts、8 active experts/token、MoE intermediate size 512
 和 262144 context limit。结构流图需同时区分 10 个 Full GQA 层和
 30 个 Gated DeltaNet 层，避免把 hybrid schedule 展示成单一注意力层。
 
-`Qwen/Qwen3.6-27B-FP8`同样展示Full GQA和Gated DeltaNet两类层，
+`Qwen3.6-27B`同样展示Full GQA和Gated DeltaNet两类层，
 但第三张结构卡必须显示Dense SwiGLU FFN与intermediate size 17408，
 不得显示MoE experts、active experts或shared expert。

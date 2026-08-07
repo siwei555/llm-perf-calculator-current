@@ -52,15 +52,6 @@ function formatGflops(value: number) {
   return `${formatNumber(value / FLOPS_PER_GFLOP, 4)} GFLOPs`;
 }
 
-function safeFilePart(value: string) {
-  return value
-    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "-")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 80);
-}
-
 function buildQwen36ComputeGroups(
   model: ModelDefinition,
   snapshot: CalculationSnapshot
@@ -527,17 +518,12 @@ export function buildPerformanceHtmlReport(input: PerformanceHtmlReportInput) {
 </html>`;
 }
 
-export function exportPerformanceHtmlReport(input: PerformanceHtmlReportInput) {
+export function writePerformanceHtmlReport(
+  input: PerformanceHtmlReportInput,
+  reportWindow: Window
+) {
   const html = buildPerformanceHtmlReport(input);
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-  const date = (input.exportedAt ?? new Date()).toISOString().slice(0, 10);
-  const filename = `llm-perf-${safeFilePart(input.model.displayName)}-${date}.html`;
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  reportWindow.document.open();
+  reportWindow.document.write(html);
+  reportWindow.document.close();
 }

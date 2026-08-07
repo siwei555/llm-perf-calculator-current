@@ -259,6 +259,7 @@ export function CalculatorControls({
                   onPlatformChange("computeThroughputTflops", numberValue(event.target.value))
                 }
               />
+              <small>FP8 建议：248 TFLOPS</small>
               <FieldError message={validationErrors.computeThroughputTflops} />
             </label>
             <label className="field">

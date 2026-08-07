@@ -50,7 +50,7 @@ export const qwen3_6Models: ModelDefinition[] = [
   {
     family: "qwen3.6",
     id: "qwen3.6-27b-fp8",
-    displayName: "Qwen/Qwen3.6-27B-FP8",
+    displayName: "Qwen3.6-27B",
     architectureKind: "hybrid-linear-dense",
     formulaStrategyId: "hybrid-linear-dense",
     configSource: "docs/Qwen_3.6/config/Qwen3.6-27B-FP8-config.json",
@@ -108,7 +108,7 @@ export const qwen3_6Models: ModelDefinition[] = [
   {
     ...sharedQwen36Definition,
     id: "qwen3.6-35b-a3b",
-    displayName: "Qwen/Qwen3.6-35B-A3B",
+    displayName: "Qwen3.6-35B-A3B",
     configSource: "docs/Qwen_3.6/config/Qwen3.6-35B-A3B-config.json",
     parameterSourceUrl: "https://huggingface.co/Qwen/Qwen3.6-35B-A3B/blob/main/config.json",
     weightSourceUrl: "https://huggingface.co/Qwen/Qwen3.6-35B-A3B",
@@ -119,20 +119,5 @@ export const qwen3_6Models: ModelDefinition[] = [
       bytesPerExpert: 2
     },
     estimatedWeightsGb: 69.32
-  },
-  {
-    ...sharedQwen36Definition,
-    id: "qwen3.6-35b-a3b-fp8",
-    displayName: "Qwen/Qwen3.6-35B-A3B-FP8",
-    configSource: "docs/Qwen_3.6/config/Qwen3.6-35B-A3B-FP8-config.json",
-    parameterSourceUrl: "https://huggingface.co/Qwen/Qwen3.6-35B-A3B-FP8/blob/main/config.json",
-    weightSourceUrl: "https://huggingface.co/Qwen/Qwen3.6-35B-A3B-FP8",
-    recommendedPrecision: {
-      label: "FP8 weights / FP8 experts / BF16 activations",
-      bytesPerWeight: 1,
-      bytesPerActivation: 2,
-      bytesPerExpert: 1
-    },
-    estimatedWeightsGb: 34.66
   }
 ];

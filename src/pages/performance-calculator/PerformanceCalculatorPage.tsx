@@ -50,20 +50,38 @@ export function PerformanceCalculatorPage() {
           : "待计算";
 
   const exportHtmlReport = async () => {
+    const reportWindow = window.open("", "_blank");
+    if (!reportWindow) {
+      setReportExportStatus("error");
+      return;
+    }
+    reportWindow.opener = null;
+    reportWindow.document.write(
+      "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><title>正在生成报告</title></head><body style=\"font-family:sans-serif;padding:32px\">正在生成 HTML 报告…</body></html>"
+    );
+    reportWindow.document.close();
     setReportExportStatus("exporting");
     try {
-      const { exportPerformanceHtmlReport } = await import(
+      const { writePerformanceHtmlReport } = await import(
         "../../features/performance-calculator/services/performanceHtmlReporter"
       );
-      exportPerformanceHtmlReport({
-        model: calculatedModel,
-        snapshot: calculationSnapshot,
-        result
-      });
+      writePerformanceHtmlReport(
+        {
+          model: calculatedModel,
+          snapshot: calculationSnapshot,
+          result
+        },
+        reportWindow
+      );
       setReportExportStatus("success");
       window.setTimeout(() => setReportExportStatus("idle"), 2500);
     } catch (error) {
       console.error("Failed to export performance HTML report", error);
+      reportWindow.document.open();
+      reportWindow.document.write(
+        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><title>报告生成失败</title></head><body style=\"font-family:sans-serif;padding:32px\">HTML 报告生成失败，请返回工具后重试。</body></html>"
+      );
+      reportWindow.document.close();
       setReportExportStatus("error");
     }
   };
@@ -103,15 +121,15 @@ export function PerformanceCalculatorPage() {
             className="secondary-button export-report-button"
             onClick={exportHtmlReport}
             disabled={reportExportStatus === "exporting"}
-            title="导出最近一次成功计算的分块理论计算 HTML 报告"
+            title="在新页面打开最近一次成功计算的分块理论计算 HTML 报告"
           >
             {reportExportStatus === "exporting"
               ? "正在生成…"
               : reportExportStatus === "success"
-                ? "已生成 HTML 报告"
+                ? "HTML 报告已打开"
                 : reportExportStatus === "error"
                   ? "导出失败，请重试"
-                  : "生成 HTML 报告"}
+                  : "打开 HTML 报告"}
           </button>
           <button
             type="button"
