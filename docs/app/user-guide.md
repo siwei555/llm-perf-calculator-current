@@ -284,6 +284,13 @@ Token 趋势图支持：
 
 彩色 Type 分块表示主要运算模块；块内逐行列出投影、Attention Core、Conv1D、Delta Scan、Compressor、Indexer 等实际参与计算的算子。报告中的理论 FLOPs 不是 profiler 采集的 kernel 时间。
 
+算子分块表下方还包含两张标准上下文明细表：
+
+- Prefill Detail：展示 Context、GFLOPs/Token、20%/40% Compute Utilization 下的 TPS，以及 40% Compute Utilization 下的 TTFT；只调整算力利用率，带宽利用率保持计算快照值。
+- Decode Detailed Data：展示 Context、Persistent Cache、Temp Peak、Total Memory，以及 40%/60%/80% Bandwidth Utilization 下的 TPS；只调整带宽利用率，算力利用率保持计算快照值。
+
+标准 Context 为 1K、2K、4K、8K、16K、32K、64K、128K，并受当前 Token Sweep End 限制。没有真实 MTP 参数和公式时，报告不会生成 MTP 倍率列。
+
 ## 8. JSON 导出
 
 点击“导出 JSON”会下载结构化计算快照，主要包含：

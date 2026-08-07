@@ -42,6 +42,14 @@ async function main() {
   assert.match(html, /charset="utf-8"/i);
   assert.match(html, /Model Config/);
   assert.match(html, /Theoretical compute \/ request/);
+  assert.match(html, /Prefill Detail/);
+  assert.match(html, /TPS @20% Compute Util/);
+  assert.match(html, /TPS @40% Compute Util/);
+  assert.match(html, /Decode Detailed Data/);
+  assert.match(html, /TPS @40% BW Util/);
+  assert.match(html, /TPS @60% BW Util/);
+  assert.match(html, /TPS @80% BW Util/);
+  assert.doesNotMatch(html, /Util\+MTP/);
   switch (model.formulaStrategyId) {
     case "hybrid-linear-dense":
       assert.match(html, /Dense FFN/);

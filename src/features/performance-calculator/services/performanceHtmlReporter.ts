@@ -443,6 +443,36 @@ function renderRows(groups: ReportGroup[]) {
     .join("\n");
 }
 
+function renderPrefillProjectionRows(result: PerformanceResult) {
+  return result.projectionSeries
+    .map(
+      (point) => `<tr>
+        <td>${formatNumber(point.contextLength, 0)}</td>
+        <td>${formatNumber(point.prefillGflopsPerToken, 3)}</td>
+        <td>${formatNumber(point.prefillTps20, 3)}</td>
+        <td>${formatNumber(point.prefillTps40, 3)}</td>
+        <td>${formatNumber(point.prefillTtftSec40, 3)}</td>
+      </tr>`
+    )
+    .join("\n");
+}
+
+function renderDecodeProjectionRows(result: PerformanceResult) {
+  return result.projectionSeries
+    .map(
+      (point) => `<tr>
+        <td>${formatNumber(point.contextLength, 0)}</td>
+        <td>${formatNumber(point.persistentCacheGb, 3)}</td>
+        <td>${formatNumber(point.temporaryMemoryGb, 3)}</td>
+        <td>${formatNumber(point.totalMemoryGb, 3)}</td>
+        <td>${formatNumber(point.decodeTps40, 3)}</td>
+        <td>${formatNumber(point.decodeTps60, 3)}</td>
+        <td>${formatNumber(point.decodeTps80, 3)}</td>
+      </tr>`
+    )
+    .join("\n");
+}
+
 export function buildPerformanceHtmlReport(input: PerformanceHtmlReportInput) {
   const exportedAt = input.exportedAt ?? new Date();
   const groups = buildReportGroups(input);
@@ -492,6 +522,13 @@ export function buildPerformanceHtmlReport(input: PerformanceHtmlReportInput) {
     .tone-result .value-cell { color: #0f3d73; background: #dbeafe; }
     .tone-trace .group-cell, .tone-trace .item-cell { background: #e9d5ff; }
     .tone-trace .value-cell { background: #f3e8ff; }
+    .report-detail { margin-top: 34px; }
+    .report-detail h2 { margin: 0 0 8px; color: #1557a6; font-size: 22px; }
+    .report-detail p { margin: 0 0 12px; color: #64748b; font-size: 12px; }
+    .detail-table { table-layout: auto; }
+    .detail-table thead th { background: #1d4fa3; }
+    .detail-table tbody td { text-align: right; font-variant-numeric: tabular-nums; }
+    .detail-table tbody tr:nth-child(even) { background: #f5f8fc; }
     footer { margin-top: 18px; color: #64748b; font-size: 12px; }
     @media (max-width: 900px) { body { padding: 0; } main { padding: 18px; } .meta { grid-template-columns: 1fr 1fr; } table { font-size: 11px; } th,td { padding: 6px; } }
     @media print { @page { size: A4 landscape; margin: 10mm; } body { padding: 0; background: #fff; } main { max-width: none; padding: 0; box-shadow: none; } tr { break-inside: avoid; } }
@@ -512,6 +549,22 @@ export function buildPerformanceHtmlReport(input: PerformanceHtmlReportInput) {
     <thead><tr><th>Type</th><th>Calculation Layer / Item</th><th>Value</th><th>Notes (Description / Formula)</th></tr></thead>
     <tbody>${renderRows(groups)}</tbody>
   </table>
+  <section class="report-detail">
+    <h2>${escapeHtml(model.displayName)} Prefill Detail</h2>
+    <p>Prefill 情景只调整 Compute Utilization；Bandwidth Utilization 保持本次计算快照设置。</p>
+    <table class="detail-table">
+      <thead><tr><th>Context</th><th>GFLOPs / Token</th><th>TPS @20% Compute Util</th><th>TPS @40% Compute Util</th><th>TTFT (sec) @40%</th></tr></thead>
+      <tbody>${renderPrefillProjectionRows(result)}</tbody>
+    </table>
+  </section>
+  <section class="report-detail">
+    <h2>${escapeHtml(model.displayName)} Decode Detailed Data</h2>
+    <p>Decode 情景只调整 Bandwidth Utilization；Compute Utilization 保持本次计算快照设置。当前模型未实现 MTP 时不增加虚拟倍率列。</p>
+    <table class="detail-table">
+      <thead><tr><th>Context</th><th>Persistent Cache (GB)</th><th>Temp Peak (GB)</th><th>Total Memory (GB)</th><th>TPS @40% BW Util</th><th>TPS @60% BW Util</th><th>TPS @80% BW Util</th></tr></thead>
+      <tbody>${renderDecodeProjectionRows(result)}</tbody>
+    </table>
+  </section>
   <footer>Generated locally by LLM Perf Calculator. Formula strategy: ${escapeHtml(model.formulaStrategyId)}.</footer>
 </main>
 </body>

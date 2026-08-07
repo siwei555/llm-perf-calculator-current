@@ -180,7 +180,7 @@ function inferBottleneck(
   return computeLimit <= bandwidthLimit ? "compute-bound" : "bandwidth-bound";
 }
 
-function ceilingAtEfficiency(
+function ceilingAtComputeEfficiency(
   computeCeiling: number,
   bandwidthCeiling: number,
   platform: PlatformInput,
@@ -188,9 +188,18 @@ function ceilingAtEfficiency(
 ) {
   const compute =
     computeCeiling * (efficiency / Math.max(platform.computeEfficiency, 1e-6));
+  return Math.min(compute, bandwidthCeiling);
+}
+
+function ceilingAtBandwidthEfficiency(
+  computeCeiling: number,
+  bandwidthCeiling: number,
+  platform: PlatformInput,
+  efficiency: number
+) {
   const bandwidth =
     bandwidthCeiling * (efficiency / Math.max(platform.bandwidthEfficiency, 1e-6));
-  return Math.min(compute, bandwidth);
+  return Math.min(computeCeiling, bandwidth);
 }
 
 function flopsQ(model: ModelDefinition, sequenceLength: number) {
@@ -1967,13 +1976,13 @@ export function calculatePerformanceResult(
   standardProjectionContexts.forEach((contextLength) => {
     const projectionWorkload = { ...workload, prefillTokenLength: contextLength };
     const pointResult = computeFn(model, platform, projectionWorkload, contextLength);
-    const prefillTps20 = ceilingAtEfficiency(
+    const prefillTps20 = ceilingAtComputeEfficiency(
       pointResult.prefillComputeTps,
       pointResult.prefillBandwidthTps,
       platform,
       0.2
     );
-    const prefillTps40 = ceilingAtEfficiency(
+    const prefillTps40 = ceilingAtComputeEfficiency(
       pointResult.prefillComputeTps,
       pointResult.prefillBandwidthTps,
       platform,
@@ -1988,19 +1997,19 @@ export function calculatePerformanceResult(
       persistentCacheGb: pointResult.cacheGb,
       temporaryMemoryGb: pointResult.tmpPeakGb,
       totalMemoryGb: pointResult.totalRuntimeMemoryGb,
-      decodeTps40: ceilingAtEfficiency(
+      decodeTps40: ceilingAtBandwidthEfficiency(
         pointResult.decodeComputeTps,
         pointResult.decodeBandwidthTps,
         platform,
         0.4
       ),
-      decodeTps60: ceilingAtEfficiency(
+      decodeTps60: ceilingAtBandwidthEfficiency(
         pointResult.decodeComputeTps,
         pointResult.decodeBandwidthTps,
         platform,
         0.6
       ),
-      decodeTps80: ceilingAtEfficiency(
+      decodeTps80: ceilingAtBandwidthEfficiency(
         pointResult.decodeComputeTps,
         pointResult.decodeBandwidthTps,
         platform,

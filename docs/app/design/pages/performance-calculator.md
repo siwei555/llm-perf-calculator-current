@@ -718,6 +718,10 @@ Tab：
 - Qwen3.6-27B 使用 Dense FFN 口径；Qwen3.6-35B-A3B 使用每 token 激活 routed experts 加 shared expert 的 MoE 口径。FP8 作为平台精度配置，不单独注册成模型；不得用 routed experts 总数冒充实际计算专家数。
 - Projection 行展示单层、单 token 理论 FLOPs；块汇总按模型注册表中的实际层数累加；Full Attention core 使用当前成功计算快照的 Prompt Token Length。
 - 报告显式声明其为理论工程估算而非实测数据，并展示模型、Prompt Length、Prefill TPS、TTFT、导出时间和公式策略。
+- 算子分块表下方追加两张标准上下文明细表：
+  - Prefill Detail：`Context / GFLOPs per Token / TPS @20% Compute Util / TPS @40% Compute Util / TTFT(sec) @40%`；情景只替换 Compute Efficiency，Bandwidth Efficiency 保持计算快照值。
+  - Decode Detailed Data：`Context / Persistent Cache / Temp Peak / Total Memory / TPS @40% BW Util / TPS @60% BW Util / TPS @80% BW Util`；情景只替换 Bandwidth Efficiency，Compute Efficiency 保持计算快照值。
+- 明细表标准 Context 使用 `1K / 2K / 4K / 8K / 16K / 32K / 64K / 128K` 且不超过 Token Range End；没有 MTP 参数和公式时不得添加 MTP 倍率列。
 - 新增公式策略时必须同步新增 HTML 专用模板；未知策略应显式报错，不能静默套用不匹配的通用表格。
 - 性能计算页同时保留 `导出 JSON`；JSON 直接由计算快照生成，并包含模型、平台、工作负载、核心结果、Prefill/Decode Projection、中间量、公式追溯和 Token Trend。数值必须保持 JSON number，单位在独立 `units` 字段或语义明确的字段名中表达。
 - 输入校验失败、未实际完成计算时，不重置上述页面状态
