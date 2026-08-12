@@ -1255,6 +1255,12 @@ h3 {
   white-space: normal;
 }
 
+.structure-flow__badge--excluded {
+  border: 1px solid rgba(217, 119, 6, 0.3);
+  background: rgba(245, 158, 11, 0.16);
+  color: #a16207;
+}
+
 .structure-flow__connector {
   position: absolute;
   left: calc(40px + (100% - 40px - 332px) / 2);

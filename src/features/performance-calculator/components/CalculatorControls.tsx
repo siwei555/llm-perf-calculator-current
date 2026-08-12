@@ -225,7 +225,7 @@ export function CalculatorControls({
             当前输入目标：<strong>{quickInputLabels[quickInputTarget]}</strong>
           </p>
           <div className="quick-actions">
-            {[4096, 8192, 32768, 131072, 1048576].map((tokenLength) => {
+            {[4096, 8192, 32768, 65536, 131072, 1048576].map((tokenLength) => {
               const exceedsContext =
                 quickInputTarget !== "tokenRangeStep" &&
                 tokenLength > selectedModel.contextLimit;

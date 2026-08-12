@@ -1,5 +1,17 @@
 # Performance Calculator Page Spec
 
+> Quick token inputs provide `4K`, `8K`, `32K`, `64K`, `128K`, and `1M`. Clicking a supported target input switches the destination of these shortcuts; values above the selected model context limit remain disabled except when editing the sweep step.
+
+> Dense Sliding Attention core uses `4 × S × Lkv × heads × head_dim`, covering both `QKᵀ` and `AV`. Dense Full Attention retains the causal-equivalent form `2 × S² × heads × head_dim`, which already equals `4 × (S²/2) × heads × head_dim` and must not be doubled again.
+
+## Gemma 4 E2B/E4B calculation and report requirements (2026-08-10)
+
+- The Gemma 4 family selector includes `Gemma-4-E2B` and `Gemma-4-E4B`.
+- Resident weight memory uses complete checkpoint parameters, while Decode weight traffic uses text-backbone parameters and row-level embedding lookup traffic.
+- Persistent KV cache is allocated only for layers that own K/V. Shared-KV layers reread the reused states during attention and remain part of Decode cache traffic.
+- Prefill and Decode compute include PLE global projection, per-layer PLE gate/projection, Attention and FFN.
+- E2B/E4B HTML reports must contain separate colored blocks for Dense FFN, Sliding Attention, Full Attention and PLE, with independent/shared-KV layer counts visible.
+
 > Source-link rule: the model summary's `模型参数来源` link opens the selected
 > model's official `config.json` through `parameterSourceUrl`. The `Weight
 > memory` row displays a separate `权重文件出处` link read from

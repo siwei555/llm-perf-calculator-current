@@ -1,5 +1,7 @@
 # Model Structure Page Spec
 
+> Coverage badges must distinguish calculation scope: decoder/attention/FFN/PLE nodes use the default teal `Used by calculator`; `lm_head` uses the yellow `Weights tracked · FLOPs excluded`; `logits` uses the yellow `Output only · FLOPs excluded`. A tied lm_head shares resident embedding weights, but the current calculator does not include the full-vocabulary projection or logits post-processing in Prefill/Decode FLOPs.
+
 ## 1. 页面目的
 
 `Model Structure` 页面用于解释当前选中模型的结构组成，让用户能从性能结果跳回模型来源，理解 `prefill`、`decode` 和内存估算所依赖的结构参数。

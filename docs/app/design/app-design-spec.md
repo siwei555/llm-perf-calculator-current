@@ -1,5 +1,11 @@
 # LLM Perf Calculator App Design Spec
 
+## Supported-model update: Gemma 4 edge models (2026-08-10)
+
+- Gemma 4 supports `Gemma-4-E2B` and `Gemma-4-E4B` in addition to the existing 12B and 26B-A4B entries.
+- E2B/E4B are Dense Decoder models with Per-Layer Embeddings and trailing cross-layer KV sharing; they are not MoE models.
+- Weight memory and text Decode traffic intentionally use separate parameter scopes. Reports must label checkpoint parameters and text-backbone parameters rather than presenting one ambiguous total.
+
 ## 1. 文档目的
 
 本文档用于沉淀 `LLM Perf Calculator` 应用的产品设定、界面结构、交互骨架和实现约束，作为后续视觉稿、前端实现和桌面打包的统一事实源。

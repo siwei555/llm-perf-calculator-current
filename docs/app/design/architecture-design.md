@@ -1,5 +1,14 @@
 # LLM Perf Calculator Architecture Design
 
+## Current Gemma 4 edge-model design (2026-08-10)
+
+- `Gemma-4-E2B` and `Gemma-4-E4B` use the existing `dense-decoder-transformer` strategy with optional PLE/KV-sharing fields.
+- `checkpointParamsB` drives resident weight memory; `textBackboneParamsB` scopes text-path Decode traffic.
+- `tokenLookupParamsB` is excluded from full per-token weight scans. Decode adds only the current main-embedding and packed-PLE rows.
+- `independentSlidingAttentionLayerCount` and `independentFullAttentionLayerCount` drive persistent KV cache and K/V projection FLOPs. Shared-KV layers still execute Q, attention core, O and FFN.
+- PLE compute contains the global `D -> L*P` projection and all per-layer `D -> P -> D` gated residual paths.
+- E2B applies double-width FFN only in its trailing KV-sharing region; E4B keeps the base FFN width.
+
 ## 1. 目标
 
 本应用是一个本地运行的 LLM 性能估算工具，用于在选定模型、输入长度和平台参数后，估算：

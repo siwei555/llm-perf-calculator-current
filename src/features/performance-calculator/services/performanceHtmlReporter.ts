@@ -198,7 +198,7 @@ function buildDenseDecoderComputeGroups(
 
   const slidingQ = 2 * D * nHeads * slidingHeadDim;
   const slidingKv = 2 * D * slidingKvHeads * slidingHeadDim * 2;
-  const slidingCore = 2 * model.slidingWindow * nHeads * slidingHeadDim;
+  const slidingCore = 4 * model.slidingWindow * nHeads * slidingHeadDim;
   const slidingOutput = 2 * nHeads * slidingHeadDim * D;
   const slidingPerLayer = slidingQ + slidingKv + slidingCore + slidingOutput;
   const slidingAllLayers = slidingPerLayer * slidingLayers;
@@ -253,7 +253,7 @@ function buildDenseDecoderComputeGroups(
       rows: [
         { item: "Project Q / layer / token", value: formatGflops(slidingQ), notes: "2 × H × attention_heads × head_dim" },
         { item: "Project K + V / layer / token", value: formatGflops(slidingKv), notes: "2 × H × kv_heads × head_dim × 2" },
-        { item: "QKᵀ + AV / layer / token", value: formatGflops(slidingCore), notes: "2 × sliding_window × attention_heads × head_dim" },
+        { item: "QKᵀ + AV / layer / token", value: formatGflops(slidingCore), notes: "4 × sliding_window × attention_heads × head_dim" },
         { item: "Project O / layer / token", value: formatGflops(slidingOutput), notes: "2 × attention_heads × head_dim × H" },
         { item: "Sliding attention total / layer / token", value: formatGflops(slidingPerLayer), notes: "Q + K/V + attention core + O" },
         { item: "Sliding attention total / token", value: formatGflops(slidingAllLayers), notes: `Sliding attention / layer / token × ${slidingLayers} layers` }
@@ -277,6 +277,108 @@ function buildDenseDecoderComputeGroups(
       rows: [
         { item: "Theoretical compute / token", value: formatGflops(prefillPerToken), notes: "FFN + Sliding Attention + Full Attention" },
         { item: "Theoretical compute / request", value: `${formatNumber((prefillPerToken * S) / 1e12, 3)} TFLOPs`, notes: "Theoretical compute / token × N" }
+      ]
+    }
+  ];
+}
+
+function buildGemmaPleComputeGroups(
+  model: ModelDefinition,
+  snapshot: CalculationSnapshot
+): ReportGroup[] {
+  const S = snapshot.workload.prefillTokenLength;
+  const D = model.hiddenSize;
+  const H = model.attentionHeads;
+  const L = model.decoderLayers;
+  const P = model.perLayerEmbeddingSize ?? 0;
+  const slidingLayers = model.slidingAttentionLayerCount ?? model.slidingLayerCount;
+  const fullLayers = model.fullAttentionLayerCount ?? 0;
+  const independentSliding = model.independentSlidingAttentionLayerCount ?? slidingLayers;
+  const independentFull = model.independentFullAttentionLayerCount ?? fullLayers;
+  const sharedSliding = slidingLayers - independentSliding;
+  const sharedFull = fullLayers - independentFull;
+  const independentLayers = independentSliding + independentFull;
+  const sharedLayers = sharedSliding + sharedFull;
+  const I = model.intermediateSize ?? 0;
+  const sharedMlpMultiplier = model.doubleWideMlpInKvSharedLayers ? 2 : 1;
+
+  const attention = (layers: number, shared: number, c: number, nKv: number, lkv: number, coreFactor: number) => {
+    const q = 2 * D * H * c;
+    const kv = 4 * D * nKv * c;
+    const core = coreFactor * lkv * H * c;
+    const output = 2 * H * c * D;
+    return { q, kv, core, output, total: layers * (q + core + output) + (layers - shared) * kv };
+  };
+  const sliding = attention(slidingLayers, sharedSliding, model.headDim, model.kvHeads, model.slidingWindow, 4);
+  const full = attention(fullLayers, sharedFull, model.globalHeadDim ?? model.headDim, model.numGlobalKeyValueHeads ?? model.kvHeads, S, 2);
+  const ffnBase = 6 * D * I;
+  const ffnShared = ffnBase * sharedMlpMultiplier;
+  const ffnTotal = independentLayers * ffnBase + sharedLayers * ffnShared;
+  const pleGlobal = 2 * D * L * P;
+  const plePerLayer = 4 * D * P;
+  const pleTotal = pleGlobal + L * plePerLayer;
+  const totalPerToken = sliding.total + full.total + ffnTotal + pleTotal;
+
+  return [
+    {
+      type: "Model Config",
+      tone: "config",
+      rows: [
+        { item: "hidden_size H", value: formatNumber(D, 0), notes: "Text backbone hidden size" },
+        { item: "num_layers", value: formatNumber(L, 0), notes: "Decoder layers" },
+        { item: "sliding / full layers", value: `${slidingLayers} / ${fullLayers}`, notes: "Attention schedule" },
+        { item: "independent / shared-KV layers", value: `${independentLayers} / ${sharedLayers}`, notes: "Shared layers omit K/V projections and persistent cache" },
+        { item: "checkpoint / text params", value: `${formatNumber(model.checkpointParamsB ?? model.totalParamsB, 3)}B / ${formatNumber(model.textBackboneParamsB ?? model.totalParamsB, 3)}B`, notes: "Resident checkpoint scope / text compute scope" },
+        { item: "prefill_tokens N", value: formatNumber(S, 0), notes: "Prompt Token Length" }
+      ]
+    },
+    {
+      type: "Dense FFN",
+      tone: "ffn",
+      rows: [
+        { item: "Base FFN / layer / token", value: formatGflops(ffnBase), notes: "6 × H × I" },
+        { item: "Shared-KV-region FFN / layer / token", value: formatGflops(ffnShared), notes: `${sharedMlpMultiplier}× intermediate width` },
+        { item: "FFN total / token", value: formatGflops(ffnTotal), notes: `${independentLayers} base + ${sharedLayers} shared-region layers` }
+      ]
+    },
+    {
+      type: "Sliding Attention\n(independent + shared KV)",
+      tone: "sliding",
+      rows: [
+        { item: "Project Q / layer / token", value: formatGflops(sliding.q), notes: `All ${slidingLayers} layers` },
+        { item: "Project K + V / independent layer / token", value: formatGflops(sliding.kv), notes: `${independentSliding} independent; ${sharedSliding} shared` },
+        { item: "QKᵀ + AV / layer / token", value: formatGflops(sliding.core), notes: "Causal sliding attention" },
+        { item: "Project O / layer / token", value: formatGflops(sliding.output), notes: `All ${slidingLayers} layers` },
+        { item: "Sliding total / token", value: formatGflops(sliding.total), notes: "All Q/core/O + independent K/V" }
+      ]
+    },
+    {
+      type: "Full Attention\n(independent + shared KV)",
+      tone: "full",
+      rows: [
+        { item: "Project Q / layer / token", value: formatGflops(full.q), notes: `All ${fullLayers} layers` },
+        { item: "Project K + V / independent layer / token", value: formatGflops(full.kv), notes: `${independentFull} independent; ${sharedFull} shared` },
+        { item: "QKᵀ + AV / layer / token", value: formatGflops(full.core), notes: "Causal full attention" },
+        { item: "Project O / layer / token", value: formatGflops(full.output), notes: `All ${fullLayers} layers` },
+        { item: "Full total / token", value: formatGflops(full.total), notes: "All Q/core/O + independent K/V" }
+      ]
+    },
+    {
+      type: "Per-Layer Embeddings (PLE)",
+      tone: "config",
+      rows: [
+        { item: "PLE width P", value: formatNumber(P, 0), notes: "Per-layer input width" },
+        { item: "Global D → L×P projection / token", value: formatGflops(pleGlobal), notes: "2 × D × L × P" },
+        { item: "Gate + projection / layer / token", value: formatGflops(plePerLayer), notes: "4 × D × P" },
+        { item: "PLE total / token", value: formatGflops(pleTotal), notes: "Global projection + all layer-local paths" }
+      ]
+    },
+    {
+      type: "Prefill Total",
+      tone: "result",
+      rows: [
+        { item: "Theoretical compute / token", value: formatGflops(totalPerToken), notes: "FFN + Sliding + Full + PLE" },
+        { item: "Theoretical compute / request", value: `${formatNumber((totalPerToken * S) / 1e12, 3)} TFLOPs`, notes: "Compute / token × N" }
       ]
     }
   ];
@@ -416,7 +518,9 @@ function buildReportGroups(input: PerformanceHtmlReportInput): ReportGroup[] {
       return buildQwen36ComputeGroups(input.model, input.snapshot);
     case "dense-decoder-transformer":
     case "dense-decoder-moe":
-      return buildDenseDecoderComputeGroups(input.model, input.snapshot);
+      return (input.model.perLayerEmbeddingSize ?? 0) > 0
+        ? buildGemmaPleComputeGroups(input.model, input.snapshot)
+        : buildDenseDecoderComputeGroups(input.model, input.snapshot);
     case "deepseek-v4-compressed-moe":
       return buildCompressedMoeComputeGroups(input.model, input.snapshot);
     default: {
