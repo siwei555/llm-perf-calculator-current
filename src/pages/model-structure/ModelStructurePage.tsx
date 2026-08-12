@@ -174,7 +174,19 @@ function StructureFlowDiagram({ model }: { model: ModelDefinition }) {
               <span>{node.dtype}</span>
             </div>
             <div className="structure-flow__shape">{node.shape}</div>
-            <span className="structure-flow__badge">Used by calculator</span>
+            <span
+              className={`structure-flow__badge${
+                node.label === "lm_head" || node.label === "logits"
+                  ? " structure-flow__badge--excluded"
+                  : ""
+              }`}
+            >
+              {node.label === "lm_head"
+                ? "Weights tracked · FLOPs excluded"
+                : node.label === "logits"
+                  ? "Output only · FLOPs excluded"
+                  : "Used by calculator"}
+            </span>
             {index < nodes.length - 1 ? (
               <span className="structure-flow__connector" aria-hidden="true" />
             ) : null}
@@ -277,7 +289,19 @@ function ParameterTable({ model }: { model: ModelDefinition }) {
       ["full_attention_layers", model.fullAttentionLayerCount ?? 0, "Full (global) attention layers", "Prefill FLOPs / Decode Cache"],
       ["sliding_window", model.slidingWindow, "Local visible window size", "Prefill Core / Decode L_kv"],
       ["intermediate_size", model.intermediateSize ?? "-", "FFN intermediate width", "Prefill FLOPs"],
+      ...(model.perLayerEmbeddingSize
+        ? [
+            ["hidden_size_per_layer_input", model.perLayerEmbeddingSize, "PLE width per decoder layer", "PLE FLOPs / Lookup Traffic"],
+            ["num_kv_shared_layers", model.kvSharedLayerCount ?? 0, "Trailing layers reusing K/V", "K/V Projection / Persistent Cache"],
+            ["independent_sliding_layers", model.independentSlidingAttentionLayerCount ?? "-", "Sliding layers owning K/V", "Persistent Cache"],
+            ["independent_full_layers", model.independentFullAttentionLayerCount ?? "-", "Full layers owning K/V", "Persistent Cache"],
+            ["double_wide_mlp_in_shared_layers", model.doubleWideMlpInKvSharedLayers ? "true" : "false", "2x FFN width in KV-sharing region", "Prefill / Decode FLOPs"]
+          ]
+        : []),
       ["hidden_activation", model.hiddenActivation ?? "gelu_pytorch_tanh", "FFN activation (GeGLU)", "Compute"],
+      ["checkpointParamsB", `${(model.checkpointParamsB ?? model.totalParamsB).toFixed(3)} B`, "Complete resident checkpoint parameters", "Weight Memory"],
+      ["textBackboneParamsB", `${(model.textBackboneParamsB ?? model.totalParamsB).toFixed(3)} B`, "Text-backbone parameters", "Decode Weight Traffic"],
+      ["tokenLookupParamsB", `${(model.tokenLookupParamsB ?? 0).toFixed(3)} B`, "Embedding tables accessed by row", "Decode Lookup Traffic"],
       ["totalParamsB", `${model.totalParamsB.toFixed(1)} B`, "Total parameters (billions)", "Weight Memory"],
       ["totalExpertParamsB", `${model.totalExpertParamsB.toFixed(1)} B`, "Expert parameters (billions)", "Weight Memory"],
       ["estimatedWeightsGb", `${model.estimatedWeightsGb.toFixed(2)} GB`, "Static weight estimate (reference)", "Decode Memory"]
@@ -404,10 +428,11 @@ export function ModelStructurePage() {
           <h3>结构流图</h3>
           <StructureFlowDiagram model={model} />
           <div className="structure-note">
-            <span>Used by calculator</span>
+            <span>Calculator coverage</span>
             <p>
-              `decoder layers`, `attention heads`, `head dim`, `MoE width`, and
-              compression schedule directly feed the performance formulas.
+              Decoder layers and their Attention/FFN/PLE operators feed the performance formulas.
+              lm_head weights are included in resident checkpoint memory (tied models share the token
+              embedding matrix), but full-vocabulary projection and logits post-processing FLOPs are excluded.
             </p>
           </div>
         </article>
@@ -546,6 +571,19 @@ export function ModelStructurePage() {
                   </div>
                 </dl>
               </article>
+
+              {model.perLayerEmbeddingSize ? (
+                <article className="panel">
+                  <h3>PLE / KV Sharing</h3>
+                  <dl className="summary-list summary-list--compact">
+                    <div><dt>PLE Width</dt><dd>{model.perLayerEmbeddingSize}</dd></div>
+                    <div><dt>KV Shared Layers</dt><dd>{model.kvSharedLayerCount ?? 0}</dd></div>
+                    <div><dt>Independent Sliding</dt><dd>{model.independentSlidingAttentionLayerCount ?? "-"}</dd></div>
+                    <div><dt>Independent Full</dt><dd>{model.independentFullAttentionLayerCount ?? "-"}</dd></div>
+                    <div><dt>Shared-region MLP</dt><dd>{model.doubleWideMlpInKvSharedLayers ? "2× width" : "Base width"}</dd></div>
+                  </dl>
+                </article>
+              ) : null}
 
               <article className="panel">
                 <h3>{model.architectureKind === "dense-decoder-moe" ? "MoE FFN" : "FFN"}</h3>

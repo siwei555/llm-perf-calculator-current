@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Derivation of Theoretical Compute for Gemma-4-E4B Prefill</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; color: #17243a; background: #eef2f7; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px; }
+    main { max-width: 1480px; margin: 0 auto; padding: 34px; background: #fff; box-shadow: 0 18px 60px rgba(23,36,58,.12); }
+    h1 { margin: 0; padding-bottom: 14px; color: #1557a6; font-size: clamp(24px, 3vw, 38px); border-bottom: 3px solid #3971ad; }
+    .meta { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin: 22px 0; }
+    .meta div { padding: 12px 14px; background: #f7f9fc; border: 1px solid #d7dfea; border-radius: 8px; }
+    .meta span { display: block; color: #64748b; font-size: 12px; }
+    .meta strong { display: block; margin-top: 4px; font-size: 15px; overflow-wrap: anywhere; }
+    .report-note { margin: 0 0 18px; padding: 12px 14px; color: #475569; background: #eff6ff; border-left: 4px solid #2563eb; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+    col.type { width: 19%; } col.item { width: 25%; } col.value { width: 18%; } col.notes { width: 38%; }
+    th, td { padding: 8px 10px; border: 1px solid #aeb8c6; vertical-align: middle; }
+    thead th { color: #fff; background: #17243a; text-align: center; }
+    .group-cell { text-align: center; white-space: normal; font-size: 14px; }
+    .item-cell { text-align: left; }
+    .value-cell { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+    .notes-cell { color: #334155; }
+    .tone-config .group-cell, .tone-config .item-cell { background: #e8edf3; }
+    .tone-config .value-cell { background: #f4f6f9; }
+    .tone-ffn .group-cell, .tone-ffn .item-cell { background: #bfdbfe; }
+    .tone-ffn .value-cell { background: #dbeafe; }
+    .tone-full .group-cell, .tone-full .item-cell { background: #f59e0b; color: #2d2108; }
+    .tone-full .value-cell { background: #fef3c7; }
+    .tone-sliding .group-cell, .tone-sliding .item-cell { background: #38bdf8; color: #082f49; }
+    .tone-sliding .value-cell { background: #e0f2fe; }
+    .tone-linear .group-cell, .tone-linear .item-cell { background: #84cc16; color: #18310a; }
+    .tone-linear .value-cell { background: #dcfce7; }
+    .tone-compressed .group-cell, .tone-compressed .item-cell { background: #fb923c; color: #431407; }
+    .tone-compressed .value-cell { background: #ffedd5; }
+    .tone-indexer .group-cell, .tone-indexer .item-cell { background: #a78bfa; color: #2e1065; }
+    .tone-indexer .value-cell { background: #ede9fe; }
+    .tone-result .group-cell, .tone-result .item-cell { color: #fff; background: #1557a6; }
+    .tone-result .value-cell { color: #0f3d73; background: #dbeafe; }
+    .tone-trace .group-cell, .tone-trace .item-cell { background: #e9d5ff; }
+    .tone-trace .value-cell { background: #f3e8ff; }
+    .report-detail { margin-top: 34px; }
+    .report-detail h2 { margin: 0 0 8px; color: #1557a6; font-size: 22px; }
+    .report-detail p { margin: 0 0 12px; color: #64748b; font-size: 12px; }
+    .detail-table { table-layout: auto; }
+    .detail-table thead th { background: #1d4fa3; }
+    .detail-table tbody td { text-align: right; font-variant-numeric: tabular-nums; }
+    .detail-table tbody tr:nth-child(even) { background: #f5f8fc; }
+    footer { margin-top: 18px; color: #64748b; font-size: 12px; }
+    @media (max-width: 900px) { body { padding: 0; } main { padding: 18px; } .meta { grid-template-columns: 1fr 1fr; } table { font-size: 11px; } th,td { padding: 6px; } }
+    @media print { @page { size: A4 landscape; margin: 10mm; } body { padding: 0; background: #fff; } main { max-width: none; padding: 0; box-shadow: none; } tr { break-inside: avoid; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Derivation of Theoretical Compute for Gemma-4-E4B Prefill</h1>
+  <section class="meta" aria-label="计算快照">
+    <div><span>Model</span><strong>Gemma-4-E4B</strong></div>
+    <div><span>Prompt Length</span><strong>131,072 tokens</strong></div>
+    <div><span>Prefill TPS / TTFT</span><strong>6,385.51 tokens/s · 20,526.48 ms</strong></div>
+    <div><span>Exported At</span><strong>2026/8/5 08:00:00</strong></div>
+  </section>
+  <p class="report-note">颜色分块表示该模型的主要运算模块；表内数值基于最近一次成功计算的模型与 Prompt 快照。Projection 行为单层、单 token 理论 FLOPs，块汇总按实际层数累加；这不是实测性能数据。</p>
+  <table>
+    <colgroup><col class="type"><col class="item"><col class="value"><col class="notes"></colgroup>
+    <thead><tr><th>Type</th><th>Calculation Layer / Item</th><th>Value</th><th>Notes (Description / Formula)</th></tr></thead>
+    <tbody><tr class="tone-config">
+            <th class="group-cell" rowspan="6">Model Config</th>
+            <th class="item-cell">hidden_size H</th>
+            <td class="value-cell">2,560</td>
+            <td class="notes-cell">Text backbone hidden size</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">num_layers</th>
+            <td class="value-cell">42</td>
+            <td class="notes-cell">Decoder layers</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">sliding / full layers</th>
+            <td class="value-cell">35 / 7</td>
+            <td class="notes-cell">Attention schedule</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">independent / shared-KV layers</th>
+            <td class="value-cell">24 / 18</td>
+            <td class="notes-cell">Shared layers omit K/V projections and persistent cache</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">checkpoint / text params</th>
+            <td class="value-cell">8B / 7.463B</td>
+            <td class="notes-cell">Resident checkpoint scope / text compute scope</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">prefill_tokens N</th>
+            <td class="value-cell">131,072</td>
+            <td class="notes-cell">Prompt Token Length</td>
+          </tr>
+<tr class="tone-ffn">
+            <th class="group-cell" rowspan="3">Dense FFN</th>
+            <th class="item-cell">Base FFN / layer / token</th>
+            <td class="value-cell">0.1573 GFLOPs</td>
+            <td class="notes-cell">6 × H × I</td>
+          </tr>
+<tr class="tone-ffn">
+            
+            <th class="item-cell">Shared-KV-region FFN / layer / token</th>
+            <td class="value-cell">0.1573 GFLOPs</td>
+            <td class="notes-cell">1× intermediate width</td>
+          </tr>
+<tr class="tone-ffn">
+            
+            <th class="item-cell">FFN total / token</th>
+            <td class="value-cell">6.606 GFLOPs</td>
+            <td class="notes-cell">24 base + 18 shared-region layers</td>
+          </tr>
+<tr class="tone-sliding">
+            <th class="group-cell" rowspan="5">Sliding Attention<br>(independent + shared KV)</th>
+            <th class="item-cell">Project Q / layer / token</th>
+            <td class="value-cell">0.0105 GFLOPs</td>
+            <td class="notes-cell">All 35 layers</td>
+          </tr>
+<tr class="tone-sliding">
+            
+            <th class="item-cell">Project K + V / independent layer / token</th>
+            <td class="value-cell">0.0052 GFLOPs</td>
+            <td class="notes-cell">20 independent; 15 shared</td>
+          </tr>
+<tr class="tone-sliding">
+            
+            <th class="item-cell">QKᵀ + AV / layer / token</th>
+            <td class="value-cell">0.0021 GFLOPs</td>
+            <td class="notes-cell">Causal sliding attention</td>
+          </tr>
+<tr class="tone-sliding">
+            
+            <th class="item-cell">Project O / layer / token</th>
+            <td class="value-cell">0.0105 GFLOPs</td>
+            <td class="notes-cell">All 35 layers</td>
+          </tr>
+<tr class="tone-sliding">
+            
+            <th class="item-cell">Sliding total / token</th>
+            <td class="value-cell">0.9123 GFLOPs</td>
+            <td class="notes-cell">All Q/core/O + independent K/V</td>
+          </tr>
+<tr class="tone-full">
+            <th class="group-cell" rowspan="5">Full Attention<br>(independent + shared KV)</th>
+            <th class="item-cell">Project Q / layer / token</th>
+            <td class="value-cell">0.021 GFLOPs</td>
+            <td class="notes-cell">All 7 layers</td>
+          </tr>
+<tr class="tone-full">
+            
+            <th class="item-cell">Project K + V / independent layer / token</th>
+            <td class="value-cell">0.0105 GFLOPs</td>
+            <td class="notes-cell">4 independent; 3 shared</td>
+          </tr>
+<tr class="tone-full">
+            
+            <th class="item-cell">QKᵀ + AV / layer / token</th>
+            <td class="value-cell">1.0737 GFLOPs</td>
+            <td class="notes-cell">Causal full attention</td>
+          </tr>
+<tr class="tone-full">
+            
+            <th class="item-cell">Project O / layer / token</th>
+            <td class="value-cell">0.021 GFLOPs</td>
+            <td class="notes-cell">All 7 layers</td>
+          </tr>
+<tr class="tone-full">
+            
+            <th class="item-cell">Full total / token</th>
+            <td class="value-cell">7.8517 GFLOPs</td>
+            <td class="notes-cell">All Q/core/O + independent K/V</td>
+          </tr>
+<tr class="tone-config">
+            <th class="group-cell" rowspan="4">Per-Layer Embeddings (PLE)</th>
+            <th class="item-cell">PLE width P</th>
+            <td class="value-cell">256</td>
+            <td class="notes-cell">Per-layer input width</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">Global D → L×P projection / token</th>
+            <td class="value-cell">0.0551 GFLOPs</td>
+            <td class="notes-cell">2 × D × L × P</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">Gate + projection / layer / token</th>
+            <td class="value-cell">0.0026 GFLOPs</td>
+            <td class="notes-cell">4 × D × P</td>
+          </tr>
+<tr class="tone-config">
+            
+            <th class="item-cell">PLE total / token</th>
+            <td class="value-cell">0.1652 GFLOPs</td>
+            <td class="notes-cell">Global projection + all layer-local paths</td>
+          </tr>
+<tr class="tone-result">
+            <th class="group-cell" rowspan="2">Prefill Total</th>
+            <th class="item-cell">Theoretical compute / token</th>
+            <td class="value-cell">15.5352 GFLOPs</td>
+            <td class="notes-cell">FFN + Sliding + Full + PLE</td>
+          </tr>
+<tr class="tone-result">
+            
+            <th class="item-cell">Theoretical compute / request</th>
+            <td class="value-cell">2,036.227 TFLOPs</td>
+            <td class="notes-cell">Compute / token × N</td>
+          </tr></tbody>
+  </table>
+  <section class="report-detail">
+    <h2>Gemma-4-E4B Prefill Detail</h2>
+    <p>Prefill 情景只调整 Compute Utilization；Bandwidth Utilization 保持本次计算快照设置。</p>
+    <table class="detail-table">
+      <thead><tr><th>Context</th><th>GFLOPs / Token</th><th>TPS @20% Compute Util</th><th>TPS @40% Compute Util</th><th>TTFT (sec) @40%</th></tr></thead>
+      <tbody><tr>
+        <td>1,024</td>
+        <td>8.078</td>
+        <td>6,140.358</td>
+        <td>10,480.727</td>
+        <td>0.098</td>
+      </tr>
+<tr>
+        <td>2,048</td>
+        <td>8.136</td>
+        <td>6,096.043</td>
+        <td>12,192.086</td>
+        <td>0.168</td>
+      </tr>
+<tr>
+        <td>4,096</td>
+        <td>8.254</td>
+        <td>6,009.305</td>
+        <td>12,018.61</td>
+        <td>0.341</td>
+      </tr>
+<tr>
+        <td>8,192</td>
+        <td>8.489</td>
+        <td>5,843.03</td>
+        <td>11,686.059</td>
+        <td>0.701</td>
+      </tr>
+<tr>
+        <td>16,384</td>
+        <td>8.959</td>
+        <td>5,536.636</td>
+        <td>11,073.271</td>
+        <td>1.48</td>
+      </tr>
+<tr>
+        <td>32,768</td>
+        <td>9.898</td>
+        <td>5,011.097</td>
+        <td>10,022.193</td>
+        <td>3.27</td>
+      </tr>
+<tr>
+        <td>65,536</td>
+        <td>11.777</td>
+        <td>4,211.57</td>
+        <td>8,423.14</td>
+        <td>7.78</td>
+      </tr>
+<tr>
+        <td>131,072</td>
+        <td>15.535</td>
+        <td>3,192.754</td>
+        <td>6,385.508</td>
+        <td>20.526</td>
+      </tr></tbody>
+    </table>
+  </section>
+  <section class="report-detail">
+    <h2>Gemma-4-E4B Decode Detailed Data</h2>
+    <p>Decode 情景只调整 Bandwidth Utilization；Compute Utilization 保持本次计算快照设置。当前模型未实现 MTP 时不增加虚拟倍率列。</p>
+    <table class="detail-table">
+      <thead><tr><th>Context</th><th>Persistent Cache (GB)</th><th>Temp Peak (GB)</th><th>Total Memory (GB)</th><th>TPS @40% BW Util</th><th>TPS @60% BW Util</th><th>TPS @80% BW Util</th></tr></thead>
+      <tbody><tr>
+        <td>1,024</td>
+        <td>0.038</td>
+        <td>0.017</td>
+        <td>20.055</td>
+        <td>13.628</td>
+        <td>20.442</td>
+        <td>27.256</td>
+      </tr>
+<tr>
+        <td>2,048</td>
+        <td>0.055</td>
+        <td>0.034</td>
+        <td>20.088</td>
+        <td>13.578</td>
+        <td>20.367</td>
+        <td>27.157</td>
+      </tr>
+<tr>
+        <td>4,096</td>
+        <td>0.088</td>
+        <td>0.067</td>
+        <td>20.155</td>
+        <td>13.48</td>
+        <td>20.22</td>
+        <td>26.96</td>
+      </tr>
+<tr>
+        <td>8,192</td>
+        <td>0.155</td>
+        <td>0.134</td>
+        <td>20.289</td>
+        <td>13.287</td>
+        <td>19.931</td>
+        <td>26.574</td>
+      </tr>
+<tr>
+        <td>16,384</td>
+        <td>0.289</td>
+        <td>0.268</td>
+        <td>20.558</td>
+        <td>12.918</td>
+        <td>19.377</td>
+        <td>25.836</td>
+      </tr>
+<tr>
+        <td>32,768</td>
+        <td>0.558</td>
+        <td>0.537</td>
+        <td>21.095</td>
+        <td>12.238</td>
+        <td>18.357</td>
+        <td>24.476</td>
+      </tr>
+<tr>
+        <td>65,536</td>
+        <td>1.095</td>
+        <td>1.074</td>
+        <td>22.168</td>
+        <td>11.072</td>
+        <td>16.608</td>
+        <td>22.144</td>
+      </tr>
+<tr>
+        <td>131,072</td>
+        <td>2.168</td>
+        <td>2.148</td>
+        <td>24.316</td>
+        <td>9.3</td>
+        <td>13.95</td>
+        <td>18.6</td>
+      </tr></tbody>
+    </table>
+  </section>
+  <footer>Generated locally by LLM Perf Calculator. Formula strategy: dense-decoder-transformer.</footer>
+</main>
+</body>
+</html>

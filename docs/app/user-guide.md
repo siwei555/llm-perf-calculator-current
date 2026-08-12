@@ -28,10 +28,19 @@
 | DeepSeek V4 | DeepSeek-V4-Flash | Compressed MoE，包含 Sliding、CSA、HCA 与 Sparse MoE |
 | DeepSeek V4 | DeepSeek-V4-Pro | Compressed MoE，包含 CSA、HCA 与 Sparse MoE |
 | Gemma 4 | Gemma-4-12B-it | Dense Decoder，Sliding/Full Attention + Dense FFN |
+| Gemma 4 | Gemma-4-E2B | Dense Decoder + PLE + shared KV + staged-width FFN |
+| Gemma 4 | Gemma-4-E4B | Dense Decoder + PLE + shared KV + Dense FFN |
 | Gemma 4 | google/gemma-4-26B-A4B-it | Sliding/Full Attention + routed MoE |
 | Qwen3.5 | Qwen3.5-35B-A3B | Full GQA + Gated DeltaNet + MoE |
 | Qwen3.6 | Qwen3.6-27B | Full GQA + Gated DeltaNet + Dense SwiGLU |
 | Qwen3.6 | Qwen3.6-35B-A3B | Full GQA + Gated DeltaNet + MoE |
+
+### Gemma 4 E2B/E4B parameter scopes
+
+- `Checkpoint Params` represents the complete multimodal checkpoint and is used for resident Weight Memory.
+- `Text Backbone Params` represents the text inference path and is used for Decode weight traffic.
+- Large token embedding and PLE tables are resident in memory, but Decode accesses only the current token rows; the calculator does not count the complete tables as traffic for every generated token.
+- Current E2B/E4B FLOPs cover the text decoder only. Vision/audio encoder FLOPs and optional MTP draft-model acceleration are not included.
 
 ## 3. 页面导航
 

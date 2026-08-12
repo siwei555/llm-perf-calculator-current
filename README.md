@@ -11,6 +11,8 @@
 | **DeepSeek V4** | DeepSeek-V4-Flash | Compressed MoE (MLA + CSA/HCA + mHC) | 200B / 6e active |
 | | DeepSeek-V4-Pro | Compressed MoE (同上) | 1.5T / 6e active |
 | **Gemma 4** | Gemma-4-12B-it | Dense Decoder (GQA/MQA + GeGLU) | 11.9B |
+| | Gemma-4-E2B | Dense Decoder (PLE + shared KV + staged GeGLU) | 5.1B checkpoint / 4.629B text |
+| | Gemma-4-E4B | Dense Decoder (PLE + shared KV + GeGLU) | 8B checkpoint / 7.463B text |
 | | google/gemma-4-26B-A4B-it | Dense Decoder MoE (Sliding/Full + routed MoE) | 26B / A4B |
 | **Qwen3.5** | Qwen3.5-35B-A3B | Hybrid (Gated DeltaNet + Full GQA + MoE) | 35B / 3B active |
 | **Qwen3.6** | Qwen3.6-27B | Hybrid (Gated DeltaNet + Full GQA + Dense SwiGLU) | 27B |
@@ -302,6 +304,10 @@ bandwidth_ceiling = effective_bandwidth / bytes_per_token
 - [google/gemma-4-26B-A4B-it](docs/gemma_4/gemma-4-26B-A4B-it.md)
 - [Qwen3.5-35B-A3B](docs/Qwen_3.5/Qwen3.5-35B-A3B.md)
 - [Qwen3.6-35B-A3B / FP8](docs/Qwen_3.6/Qwen3.6-35B-A3B.md)
+
+## Code Design Archive
+
+- [代码设计文档](docs/app/code-design.md)
 
 ## License
 

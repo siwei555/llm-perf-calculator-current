@@ -164,11 +164,16 @@ F_moe = 6 * S * D * I * (k + 1)`,
   },
   "dense-decoder-transformer": {
     expression: `F_prefill = L_sliding * F_sliding
-          + L_full * F_full
+          + L_full * F_full + F_PLE
 
 F_layer = F_Q + F_KV + F_attention
         + F_O + F_MLP
-F_MLP = 6 * S * D * I`,
+F_attention_sliding = 4 * S * Lkv * n_h * c
+F_attention_full = 2 * S^2 * n_h * c
+F_KV(shared layer) = 0
+F_MLP = 6 * S * D * I_layer
+F_PLE = 2 * S * D * (L * P)
+      + L * 4 * S * D * P`,
     notes: [
       "总 FLOPs 由 Sliding Attention 层与 Full Attention 层的计算量汇总。",
       "两种层分别展开 Q、KV、Attention、输出投影和 Dense MLP。",

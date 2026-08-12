@@ -144,9 +144,29 @@ function bytesToGb(bytes: number) {
 
 /** 根据字节/参数设置动态计算权重显存 */
 function computeWeightGb(model: ModelDefinition, platform: PlatformInput): number {
-  const nonexpertB = model.totalParamsB - model.totalExpertParamsB;
+  const checkpointParamsB = model.checkpointParamsB ?? model.totalParamsB;
+  const nonexpertB = checkpointParamsB - model.totalExpertParamsB;
   const expertB = model.totalExpertParamsB;
   return nonexpertB * platform.bytesPerWeight + expertB * platform.bytesPerExpert;
+}
+
+function computeDecodeWeightBytes(model: ModelDefinition, platform: PlatformInput): number {
+  const textParamsB = model.textBackboneParamsB ?? model.totalParamsB;
+  const lookupParamsB = Math.min(model.tokenLookupParamsB ?? 0, textParamsB);
+  const lookupValuesPerToken = model.hiddenSize +
+    model.decoderLayers * (model.perLayerEmbeddingSize ?? 0);
+  const lookupBytesPerToken = lookupValuesPerToken * platform.bytesPerWeight;
+  const expertB = Math.min(model.totalExpertParamsB, textParamsB - lookupParamsB);
+  const nonExpertDenseB = Math.max(textParamsB - lookupParamsB - expertB, 0);
+  const activeExpertFraction = model.moeExperts > 0
+    ? model.activeExperts / model.moeExperts
+    : 1;
+
+  return (
+    nonExpertDenseB * 1_000_000_000 * platform.bytesPerWeight +
+    expertB * 1_000_000_000 * activeExpertFraction * platform.bytesPerExpert +
+    lookupBytesPerToken
+  );
 }
 
 function formatTflops(value: number) {
@@ -452,13 +472,22 @@ function denseFlopsOutput(model: ModelDefinition, seqLen: number, headDim: numbe
   return 2 * seqLen * model.attentionHeads * headDim * model.hiddenSize;
 }
 
-function denseFlopsMlp(model: ModelDefinition, seqLen: number) {
+function denseFlopsMlp(model: ModelDefinition, seqLen: number, widthMultiplier = 1) {
   if (model.formulaStrategyId === "dense-decoder-moe") {
     return 6 * seqLen * model.hiddenSize * model.moeIntermediateSize * (model.activeExperts + 1);
   }
 
   const I = model.intermediateSize ?? model.moeIntermediateSize;
-  return 6 * seqLen * model.hiddenSize * I;
+  return 6 * seqLen * model.hiddenSize * I * widthMultiplier;
+}
+
+function densePleFlops(model: ModelDefinition, seqLen: number) {
+  const P = model.perLayerEmbeddingSize ?? 0;
+  if (P <= 0) return 0;
+  const L = model.decoderLayers;
+  const globalProjection = 2 * seqLen * model.hiddenSize * L * P;
+  const perLayerGateAndProjection = L * 4 * seqLen * model.hiddenSize * P;
+  return globalProjection + perLayerGateAndProjection;
 }
 
 type DenseLayerBreakdown = {
@@ -477,13 +506,17 @@ function denseLayerBreakdown(
   headDim: number,
   nKv: number,
   hasVProj: boolean,
-  causalFactor: number
+  causalFactor: number,
+  includeKvProjection = true,
+  mlpWidthMultiplier = 1
 ): DenseLayerBreakdown {
   const q = denseFlopsQ(model, seqLen, headDim);
-  const kvProj = denseFlopsKvProj(model, seqLen, nKv, headDim, hasVProj);
+  const kvProj = includeKvProjection
+    ? denseFlopsKvProj(model, seqLen, nKv, headDim, hasVProj)
+    : 0;
   const core = denseFlopsCore(model, seqLen, lkv, headDim, causalFactor);
   const output = denseFlopsOutput(model, seqLen, headDim);
-  const mlp = denseFlopsMlp(model, seqLen);
+  const mlp = denseFlopsMlp(model, seqLen, mlpWidthMultiplier);
   const total = q + kvProj + core + output + mlp;
   return { q, kvProj, core, output, mlp, total };
 }
@@ -515,8 +548,11 @@ function denseDecodeFlopsPerToken(
 ) {
   const D = model.hiddenSize;
   const n_h = model.attentionHeads;
-  const I = model.moeIntermediateSize;
-  const k = model.activeExperts;
+  const independentSliding = model.independentSlidingAttentionLayerCount ?? slidingLayers;
+  const independentFull = model.independentFullAttentionLayerCount ?? fullLayers;
+  const sharedSliding = slidingLayers - independentSliding;
+  const sharedFull = fullLayers - independentFull;
+  const sharedMlpMultiplier = model.doubleWideMlpInKvSharedLayers ? 2 : 1;
 
   const slidingQ = 2 * D * n_h * cSliding;
   const slidingKv = 2 * D * nKvSliding * cSliding * (hasVProjSliding ? 2 : 1);
@@ -528,11 +564,15 @@ function denseDecodeFlopsPerToken(
   const fullCore = 4 * contextLength * n_h * cFull;
   const fullOutput = 2 * n_h * cFull * D;
 
-  const moe = 6 * D * I * (k + 1);
+  const baseMlp = denseFlopsMlp(model, 1);
+  const sharedMlp = denseFlopsMlp(model, 1, sharedMlpMultiplier);
 
   return (
-    slidingLayers * (slidingQ + slidingKv + slidingCore + slidingOutput + moe) +
-    fullLayers * (fullQ + fullKv + fullCore + fullOutput + moe)
+    independentSliding * (slidingQ + slidingKv + slidingCore + slidingOutput + baseMlp) +
+    sharedSliding * (slidingQ + slidingCore + slidingOutput + sharedMlp) +
+    independentFull * (fullQ + fullKv + fullCore + fullOutput + baseMlp) +
+    sharedFull * (fullQ + fullCore + fullOutput + sharedMlp) +
+    densePleFlops(model, 1)
   );
 }
 
@@ -558,14 +598,34 @@ function computeDenseFullResult(
   const nKvFull = model.numGlobalKeyValueHeads ?? model.kvHeads;
   const hasVProjFull = !(model.attentionKEqV ?? false);
 
-  const causalFactor = 2;
+  const slidingCoreFactor = 4;
+  const fullCausalCoreFactor = 2;
+  const independentSliding = model.independentSlidingAttentionLayerCount ?? slidingLayers;
+  const independentFull = model.independentFullAttentionLayerCount ?? fullLayers;
+  const sharedSliding = slidingLayers - independentSliding;
+  const sharedFull = fullLayers - independentFull;
+  const sharedMlpMultiplier = model.doubleWideMlpInKvSharedLayers ? 2 : 1;
 
   // ---- Prefill FLOPs ----
-  const slidingBreakdown = denseLayerBreakdown(model, S, nWin, cSliding, nKvSliding, hasVProjSliding, causalFactor);
-  const fullBreakdown = denseLayerBreakdown(model, S, S, cFull, nKvFull, hasVProjFull, causalFactor);
+  const slidingIndependentBreakdown = denseLayerBreakdown(
+    model, S, nWin, cSliding, nKvSliding, hasVProjSliding, slidingCoreFactor
+  );
+  const slidingSharedBreakdown = denseLayerBreakdown(
+    model, S, nWin, cSliding, nKvSliding, hasVProjSliding, slidingCoreFactor, false, sharedMlpMultiplier
+  );
+  const fullIndependentBreakdown = denseLayerBreakdown(
+    model, S, S, cFull, nKvFull, hasVProjFull, fullCausalCoreFactor
+  );
+  const fullSharedBreakdown = denseLayerBreakdown(
+    model, S, S, cFull, nKvFull, hasVProjFull, fullCausalCoreFactor, false, sharedMlpMultiplier
+  );
 
   const prefillFlops =
-    slidingLayers * slidingBreakdown.total + fullLayers * fullBreakdown.total;
+    independentSliding * slidingIndependentBreakdown.total +
+    sharedSliding * slidingSharedBreakdown.total +
+    independentFull * fullIndependentBreakdown.total +
+    sharedFull * fullSharedBreakdown.total +
+    densePleFlops(model, S);
 
   // ---- Memory ----
   const e = platform.bytesPerActivation;
@@ -573,8 +633,8 @@ function computeDenseFullResult(
 
   const slidingCachePerLayer = denseCacheBytesPerLayer(model, B, nWin, nKvSliding, cSliding, e);
   const fullCachePerLayer = denseCacheBytesPerLayer(model, B, S_ctx, nKvFull, cFull, e);
-  const slidingCacheTotal = slidingLayers * slidingCachePerLayer;
-  const fullCacheTotal = fullLayers * fullCachePerLayer;
+  const slidingCacheTotal = independentSliding * slidingCachePerLayer;
+  const fullCacheTotal = independentFull * fullCachePerLayer;
   const cacheBytes = slidingCacheTotal + fullCacheTotal;
   const cacheGb = bytesToGb(cacheBytes);
 
@@ -605,20 +665,10 @@ function computeDenseFullResult(
   const decodeFullBytesPerToken = denseCacheBytesPerLayer(model, B, decodeFullLkv, nKvFull, cFull, e);
   const decodeCacheTrafficBytes =
     slidingLayers * decodeSlidingBytesPerToken + fullLayers * decodeFullBytesPerToken;
-  const isDenseMoe = model.formulaStrategyId === "dense-decoder-moe";
-  const activeExpertFraction = model.moeExperts > 0
-    ? model.activeExperts / model.moeExperts
-    : 1;
-  const nonExpertB = model.totalParamsB - model.totalExpertParamsB;
-  const expertB = model.totalExpertParamsB;
-  const decodeWeightBytes = isDenseMoe
-    ? nonExpertB * 1_000_000_000 * platform.bytesPerWeight +
-      expertB * 1_000_000_000 * activeExpertFraction * platform.bytesPerExpert
-    : weightGb * 1_000_000_000;
+  const decodeWeightBytes = computeDecodeWeightBytes(model, platform);
   const decodeBytes = decodeWeightBytes + decodeCacheTrafficBytes;
 
-  const decodeComputeFlopsPerToken = isDenseMoe
-    ? denseDecodeFlopsPerToken(
+  const decodeComputeFlopsPerToken = denseDecodeFlopsPerToken(
       model,
       S_ctx,
       slidingLayers,
@@ -631,8 +681,7 @@ function computeDenseFullResult(
       hasVProjFull,
       decodeSlidingLkv,
       decodeFullLkv
-    )
-    : 6 * model.hiddenSize * (model.intermediateSize ?? model.moeIntermediateSize);
+    );
 
   const decodeComputeTps = effectiveCompute / decodeComputeFlopsPerToken;
   const decodeBandwidthTps = effectiveBandwidth / decodeBytes;
@@ -652,6 +701,28 @@ function computeDenseFullResult(
     moe: d.mlp,
     total: d.total
   });
+
+  const averageBreakdown = (
+    independent: DenseLayerBreakdown,
+    shared: DenseLayerBreakdown,
+    independentCount: number,
+    sharedCount: number
+  ): DenseLayerBreakdown => {
+    const totalCount = independentCount + sharedCount;
+    if (totalCount === 0) return independent;
+    const average = (key: keyof DenseLayerBreakdown) =>
+      (independent[key] * independentCount + shared[key] * sharedCount) / totalCount;
+    return {
+      q: average("q"), kvProj: average("kvProj"), core: average("core"),
+      output: average("output"), mlp: average("mlp"), total: average("total")
+    };
+  };
+  const slidingBreakdown = averageBreakdown(
+    slidingIndependentBreakdown, slidingSharedBreakdown, independentSliding, sharedSliding
+  );
+  const fullBreakdown = averageBreakdown(
+    fullIndependentBreakdown, fullSharedBreakdown, independentFull, sharedFull
+  );
 
   return {
     prefillFlops,
@@ -855,6 +926,7 @@ function buildDenseFormulaTrace(
   const fullLayers = model.fullAttentionLayerCount ?? 0;
   const cFull = model.globalHeadDim ?? model.headDim;
   const nKvFull = model.numGlobalKeyValueHeads ?? model.kvHeads;
+  const pleFlops = densePleFlops(model, workload.prefillTokenLength);
 
   const slidingTotal = result.slidingLayer.total * slidingLayers;
   const fullTotal = result.csaLayer.total * fullLayers;
@@ -885,7 +957,7 @@ function buildDenseFormulaTrace(
         },
         {
           label: "Sliding core attention FLOPs",
-          expression: "2 · S · n_win · n_h · c_s  (FA/SDPA causal)",
+          expression: "4 · S · n_win · n_h · c_s  (QKᵀ + AV)",
           evaluated: `${formatTflops(result.slidingLayer.core)} per layer × ${slidingLayers} = ${formatTflops(result.slidingLayer.core * slidingLayers)}`
         },
         {
@@ -910,6 +982,11 @@ function buildDenseFormulaTrace(
           expression: isDenseMoe ? "6 · S · D · I_moe · (k + 1)" : "6 · S · D · I",
           evaluated: `${formatTflops(result.slidingLayer.moe)} per layer × ${model.decoderLayers} = ${formatTflops(result.slidingLayer.moe * model.decoderLayers)}`
         },
+        ...(pleFlops > 0 ? [{
+          label: "Per-Layer Embeddings FLOPs",
+          expression: "2 * S * D * (L * P) + L * 4 * S * D * P",
+          evaluated: formatTflops(pleFlops)
+        }] : []),
         {
           label: "Sliding layer total",
           expression: "F_Q + F_KV + F_core + F_O + F_MLP",

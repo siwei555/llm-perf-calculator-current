@@ -72,6 +72,20 @@ export type ModelDefinition = {
   attentionKEqV?: boolean;
   /** FFN 激活函数 */
   hiddenActivation?: string;
+  /** Complete checkpoint parameter count (B), used for resident weight memory. */
+  checkpointParamsB?: number;
+  /** Text-backbone parameter count (B), excluding vision/audio encoders. */
+  textBackboneParamsB?: number;
+  /** Embedding-table parameters (B) accessed by row rather than scanned per token. */
+  tokenLookupParamsB?: number;
+  /** Gemma Per-Layer Embedding width; zero/undefined means PLE is disabled. */
+  perLayerEmbeddingSize?: number;
+  /** Number of trailing layers that reuse K/V from earlier layers of the same type. */
+  kvSharedLayerCount?: number;
+  independentSlidingAttentionLayerCount?: number;
+  independentFullAttentionLayerCount?: number;
+  /** Whether the KV-sharing region uses 2x intermediate width. */
+  doubleWideMlpInKvSharedLayers?: boolean;
 
   // —— hybrid-linear-moe / hybrid-linear-dense 专用 ——
   /** Gated DeltaNet 线性注意层数 */

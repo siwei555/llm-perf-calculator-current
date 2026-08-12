@@ -65,8 +65,12 @@ async function main() {
       break;
     case "dense-decoder-transformer":
       assert.match(html, /Dense FFN/);
-      assert.match(html, /Sliding-window Attention/);
+      assert.match(html, model.perLayerEmbeddingSize ? /Sliding Attention/ : /Sliding-window Attention/);
       assert.match(html, /Full Attention/);
+      if (model.perLayerEmbeddingSize) {
+        assert.match(html, /Per-Layer Embeddings \(PLE\)/);
+        assert.match(html, /independent \/ shared-KV layers/);
+      }
       assert.doesNotMatch(html, /active_experts \/ token/);
       break;
     case "dense-decoder-moe":
