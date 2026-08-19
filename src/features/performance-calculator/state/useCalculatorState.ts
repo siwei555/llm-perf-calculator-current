@@ -127,8 +127,8 @@ function validateState(state: CalculatorState): CalculatorValidation {
 
   const resolvedDecodeOutputTokens =
     state.workload.decodeOutputTokens ?? state.workload.prefillTokenLength;
-  if (!Number.isFinite(resolvedDecodeOutputTokens) || resolvedDecodeOutputTokens <= 0) {
-    errors.decodeOutputTokens = "需大于 0";
+  if (!Number.isFinite(resolvedDecodeOutputTokens) || resolvedDecodeOutputTokens < 0) {
+    errors.decodeOutputTokens = "需大于或等于 0";
   } else if (state.workload.prefillTokenLength + resolvedDecodeOutputTokens > model.contextLimit) {
     errors.decodeOutputTokens = `Prompt + Decode 不能超过当前模型最大上下文 ${model.contextLimit.toLocaleString()}`;
   }

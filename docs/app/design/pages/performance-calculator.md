@@ -4,6 +4,8 @@
 
 > Dense Sliding Attention core uses `4 × S × Lkv × heads × head_dim`, covering both `QKᵀ` and `AV`. Dense Full Attention retains the causal-equivalent form `2 × S² × heads × head_dim`, which already equals `4 × (S²/2) × heads × head_dim` and must not be doubled again.
 
+> `Decode Output Tokens` accepts zero. An explicit `0` means no Decode tokens are generated: Decode Time and Average Decode TPS are reported as zero, Final Context remains the prompt length, and peak memory remains the initial-context estimate. An empty field still defaults to Prompt Token Length.
+
 ## Gemma 4 E2B/E4B calculation and report requirements (2026-08-10)
 
 - The Gemma 4 family selector includes `Gemma-4-E2B` and `Gemma-4-E4B`.

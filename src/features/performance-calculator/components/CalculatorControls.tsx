@@ -174,7 +174,7 @@ export function CalculatorControls({
                   onWorkloadChange("decodeOutputTokens", optionalNumberValue(event.target.value))
                 }
               />
-              <small>留空时按 Prompt Token Length 计算</small>
+              <small>留空时按 Prompt Token Length 计算；填 0 表示不生成 Decode token</small>
               <FieldError message={validationErrors.decodeOutputTokens} />
             </label>
           </div>

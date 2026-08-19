@@ -88,6 +88,16 @@ function summarizeDecodeGeneration(
 ): DecodeGenerationSummary {
   const outputTokens = workload.decodeOutputTokens ?? workload.prefillTokenLength;
   const promptLength = workload.prefillTokenLength;
+  if (outputTokens === 0) {
+    return {
+      initialDecodeTps: initialResult.decodeTps,
+      averageDecodeTps: 0,
+      decodeTimeMs: 0,
+      outputTokens: 0,
+      finalContext: promptLength,
+      peakResult: initialResult
+    };
+  }
   const maxSamples = 256;
   const sampleCount = Math.min(outputTokens, maxSamples);
   let latencySumMs = 0;
@@ -927,6 +937,11 @@ function buildDenseFormulaTrace(
   const cFull = model.globalHeadDim ?? model.headDim;
   const nKvFull = model.numGlobalKeyValueHeads ?? model.kvHeads;
   const pleFlops = densePleFlops(model, workload.prefillTokenLength);
+  const sharedMlpLayers = isDenseMoe ? 0 : (model.kvSharedLayerCount ?? 0);
+  const baseMlpLayers = model.decoderLayers - sharedMlpLayers;
+  const baseMlpFlops = denseFlopsMlp(model, workload.prefillTokenLength);
+  const sharedMlpMultiplier = model.doubleWideMlpInKvSharedLayers ? 2 : 1;
+  const sharedMlpFlops = denseFlopsMlp(model, workload.prefillTokenLength, sharedMlpMultiplier);
 
   const slidingTotal = result.slidingLayer.total * slidingLayers;
   const fullTotal = result.csaLayer.total * fullLayers;
@@ -975,13 +990,28 @@ function buildDenseFormulaTrace(
           expression: "2 · S · n_h · c_f · D",
           evaluated: `${formatTflops(result.csaLayer.output)} per layer × ${fullLayers} = ${formatTflops(result.csaLayer.output * fullLayers)}`
         },
-        {
-          label: isDenseMoe
-            ? "MoE FLOPs (top-k routed experts, all layers)"
-            : "MLP FLOPs (GeGLU, all layers)",
-          expression: isDenseMoe ? "6 · S · D · I_moe · (k + 1)" : "6 · S · D · I",
-          evaluated: `${formatTflops(result.slidingLayer.moe)} per layer × ${model.decoderLayers} = ${formatTflops(result.slidingLayer.moe * model.decoderLayers)}`
-        },
+        ...(isDenseMoe
+          ? [{
+              label: "MoE FLOPs (top-k routed experts, all layers)",
+              expression: "6 · S · D · I_moe · (k + 1)",
+              evaluated: `${formatTflops(result.slidingLayer.moe)} per layer × ${model.decoderLayers} = ${formatTflops(result.slidingLayer.moe * model.decoderLayers)}`
+            }]
+          : [
+              {
+                label: "Base-width MLP FLOPs",
+                expression: "F_MLP_base = 6 · S · D · I",
+                evaluated: `${formatTflops(baseMlpFlops)} per layer × ${baseMlpLayers} = ${formatTflops(baseMlpFlops * baseMlpLayers)}`
+              },
+              ...(sharedMlpLayers > 0 ? [{
+                label: model.doubleWideMlpInKvSharedLayers
+                  ? "Double-width MLP FLOPs (shared-KV layers)"
+                  : "Base-width MLP FLOPs (shared-KV layers)",
+                expression: model.doubleWideMlpInKvSharedLayers
+                  ? "F_MLP_shared = 6 · S · D · (2I)"
+                  : "F_MLP_shared = 6 · S · D · I",
+                evaluated: `${formatTflops(sharedMlpFlops)} per layer × ${sharedMlpLayers} = ${formatTflops(sharedMlpFlops * sharedMlpLayers)}`
+              }] : [])
+            ]),
         ...(pleFlops > 0 ? [{
           label: "Per-Layer Embeddings FLOPs",
           expression: "2 * S * D * (L * P) + L * 4 * S * D * P",

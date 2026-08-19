@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import type { FormulaStrategyId, ModelId } from "../../domain/model/types";
+import type { FormulaStrategyId, ModelDefinition, ModelId } from "../../domain/model/types";
 import type { FormulaTraceSection } from "../../domain/performance/types";
 import { getFormulaTraceRowTarget } from "../../features/performance-calculator/utils/formulaTraceTargets";
 import { useCalculatorContext } from "../../features/performance-calculator/state/CalculatorProvider";
@@ -25,6 +25,8 @@ const traceVariableCatalog: Record<string, TraceVariableDefinition> = {
   S_ctx: { symbol: "S_ctx", meaning: "Decode 开始时已经存在的上下文 token 数。", source: "工作负载输入" },
   D: { symbol: "D", meaning: "模型隐藏层维度。", source: "模型 config.json" },
   I: { symbol: "I", meaning: "FFN 或单个专家的中间层维度。", source: "模型 config.json" },
+  I_layer: { symbol: "I_layer", meaning: "当前 decoder 层实际使用的 MLP intermediate size。", source: "由基础宽度和分层 MLP schedule 派生" },
+  P: { symbol: "P", meaning: "每个 decoder 层的 PLE 输入维度。", source: "模型 config.json：hidden_size_per_layer_input" },
   I_moe: { symbol: "I_moe", meaning: "单个 MoE 专家的中间层维度。", source: "模型 config.json" },
   k: { symbol: "k", meaning: "每个 token 激活的 routed expert 数量。", source: "模型 config.json" },
   E: { symbol: "E", meaning: "每层 routed expert 总数。", source: "模型 config.json" },
@@ -75,6 +77,7 @@ const traceVariableCatalog: Record<string, TraceVariableDefinition> = {
   F_core: { symbol: "F_core", meaning: "Attention 核心计算的 FLOPs。", source: "公式派生" },
   F_O: { symbol: "F_O", meaning: "Attention 输出投影的 FLOPs。", source: "公式派生" },
   F_MLP: { symbol: "F_MLP", meaning: "Dense MLP 的 FLOPs。", source: "公式派生" },
+  F_PLE: { symbol: "F_PLE", meaning: "Per-Layer Embeddings 全局投影及所有逐层门控/投影的 FLOPs。", source: "PLE 公式派生" },
   F_MoE: { symbol: "F_MoE", meaning: "MoE 前馈路径的 FLOPs。", source: "公式派生" },
   F_FFN: { symbol: "F_FFN", meaning: "Dense FFN 路径的 FLOPs。", source: "公式派生" },
   F_compressor: { symbol: "F_compressor", meaning: "Token compressor 的 FLOPs。", source: "公式派生" },
@@ -172,6 +175,8 @@ F_attention_sliding = 4 * S * Lkv * n_h * c
 F_attention_full = 2 * S^2 * n_h * c
 F_KV(shared layer) = 0
 F_MLP = 6 * S * D * I_layer
+I_layer = I                    (base / independent-KV layer)
+I_layer = 2 * I                (shared-KV layer when double-wide is enabled)
 F_PLE = 2 * S * D * (L * P)
       + L * 4 * S * D * P`,
     notes: [
@@ -188,9 +193,13 @@ F_PLE = 2 * S * D * (L * P)
       { symbol: "F_attention", meaning: "Attention 核心计算的 FLOPs。" },
       { symbol: "F_O", meaning: "Attention 输出投影的 FLOPs。" },
       { symbol: "F_MLP", meaning: "Dense GeGLU/SwiGLU 前馈网络的 FLOPs。" },
+      { symbol: "F_PLE", meaning: "PLE 总 FLOPs，包括一次 D→L×P 全局投影，以及每层 D→P gate 和 P→D projection。" },
       { symbol: "S", meaning: "Prompt token length。" },
       { symbol: "D", meaning: "模型 hidden size。" },
-      { symbol: "I", meaning: "Dense MLP 的 intermediate size。" }
+      { symbol: "L", meaning: "Decoder 总层数；用于 PLE packed projection 和逐层 PLE 路径计数。" },
+      { symbol: "P", meaning: "每层 PLE 输入维度，即 hidden_size_per_layer_input；Gemma-4-E2B 为 256。" },
+      { symbol: "I", meaning: "Dense MLP 的基础 intermediate size。" },
+      { symbol: "I_layer", meaning: "当前层实际使用的 intermediate size；普通层为 I，启用双宽的 KV 共享层为 2I。" }
     ]
   },
   "dense-decoder-moe": {
@@ -276,6 +285,34 @@ F_linear = F_inproj + F_conv + F_scan
   }
 } satisfies Record<FormulaStrategyId, PrefillFormulaGuide>;
 
+function getPrefillFormulaGuide(model: ModelDefinition): PrefillFormulaGuide {
+  const guide = prefillFormulaGuides[model.formulaStrategyId];
+  if (model.formulaStrategyId !== "dense-decoder-transformer") return guide;
+
+  const sharedLayers = model.kvSharedLayerCount ?? 0;
+  const baseLayers = model.decoderLayers - sharedLayers;
+  const I = model.intermediateSize ?? 0;
+  const sharedWidth = model.doubleWideMlpInKvSharedLayers ? 2 * I : I;
+
+  return {
+    ...guide,
+    expression: `${guide.expression}
+
+Current model:
+L_base = ${baseLayers}, I_base = ${I}
+L_shared_kv = ${sharedLayers}, I_shared_kv = ${sharedWidth}
+F_MLP_total = 6 * S * D * (${baseLayers} * ${I} + ${sharedLayers} * ${sharedWidth})`,
+    notes: [
+      ...guide.notes,
+      model.doubleWideMlpInKvSharedLayers
+        ? `当前 ${model.displayName} 的 ${sharedLayers} 个 KV 共享层使用双宽 MLP（I_layer = 2I = ${sharedWidth}）。`
+        : sharedLayers > 0
+          ? `当前 ${model.displayName} 虽有 ${sharedLayers} 个 KV 共享层，但这些层仍使用基础 MLP 宽度 I = ${I}。`
+          : `当前 ${model.displayName} 所有层均使用基础 MLP 宽度 I = ${I}。`
+    ]
+  };
+}
+
 const prefillTpsVariables: FormulaVariable[] = [
   { symbol: "TPS_prefill", meaning: "Prefill 阶段每秒处理的 token 数。" },
   { symbol: "S", meaning: "Prompt token length。" },
@@ -309,6 +346,10 @@ const variableSourceBySymbol: Record<string, string> = {
   m_csa: "模型 config.json：CSA Compression Rate",
   D: "模型 config.json：Hidden Size",
   I: "模型 config.json：Intermediate Size",
+  I_layer: "模型 config.json 与 MLP schedule：基础层为 I，双宽共享 KV 层为 2I",
+  L: "模型 config.json：Num Hidden Layers",
+  P: "模型 config.json：Hidden Size Per Layer Input",
+  F_PLE: "由 PLE 全局投影和逐层 gate/projection 公式派生",
   I_moe: "模型 config.json：MoE Intermediate Size",
   k: "模型 config.json：Active Experts / Token",
   effective_compute: "平台参数：Compute Throughput × Compute Efficiency",
@@ -544,7 +585,7 @@ export function FormulaNotesPage() {
   const prefillTrace = result.formulaTrace.find((trace) => trace.category === "prefill");
   const decodeTrace = result.formulaTrace.find((trace) => trace.category === "decode");
   const memoryTrace = result.formulaTrace.find((trace) => trace.category === "memory");
-  const prefillFormulaGuide = prefillFormulaGuides[model.formulaStrategyId];
+  const prefillFormulaGuide = getPrefillFormulaGuide(model);
 
   return (
     <section className="page-section" ref={pageRef}>

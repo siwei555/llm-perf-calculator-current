@@ -42,6 +42,8 @@
 - Large token embedding and PLE tables are resident in memory, but Decode accesses only the current token rows; the calculator does not count the complete tables as traffic for every generated token.
 - Current E2B/E4B FLOPs cover the text decoder only. Vision/audio encoder FLOPs and optional MTP draft-model acceleration are not included.
 
+`Decode Output Tokens` 可填写 `0`，表示只评估 Prompt/初始 Decode 状态、不生成输出 token。此时 Decode Time 和 Average Decode TPS 为 0，Final Context 等于 Prompt Token Length；留空则仍默认使用 Prompt Token Length。
+
 ## 3. 页面导航
 
 左侧导航包含四个页面，每个页面下面都有可折叠的小标题。点击小标题可以直接定位到对应区域。

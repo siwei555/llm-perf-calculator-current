@@ -1,5 +1,9 @@
 # Formula Notes Page Spec
 
+> Dense Decoder MLP formulas must define `I_layer` explicitly. Base/independent-KV layers use `I_layer = I`; KV-sharing layers use `I_layer = 2I` only when the model enables double-wide MLP. The current-model formula and trace must show base/shared layer counts, actual widths, and separate FLOPs contributions rather than leaving `I_layer` undefined.
+
+> Models with Per-Layer Embeddings must list `F_PLE`, `L`, and `P` in the formula variable table. `F_PLE` includes the global `D -> L×P` projection plus every layer's `D -> P` gate and `P -> D` projection; `P` comes from `hidden_size_per_layer_input`.
+
 ## 1. 页面目的
 
 `Formula Notes` 页面用于解释性能计算页中的公式口径，让用户能从结果值追溯到公式、变量定义、模型字段和平台输入。
