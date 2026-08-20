@@ -12,6 +12,10 @@
 
 Gemma 4 使用的 `dense-decoder-transformer` 与 `dense-decoder-moe` 策略必须在 Decode 板块逐项展示与计算结果相同的追溯行，包括可见长度、cache/权重/总流量、每 token FLOPs、两个吞吐上限和最终 Effective Decode TPS。
 
+Gemma Prefill 必须区分 Sliding/Full Attention 的 independent-KV 与 shared-KV
+层；shared-KV 层的 `F_KV = 0`。总式包含适用模型的 `F_PLE`，持久 KV cache
+只按 independent-KV 层数计算。没有 PLE 的模型不得显示 PLE 公式。
+
 页面重点是“可审计”，不是写成论文式长文。用户应能快速定位：
 
 - `TTFT` 如何得到
@@ -142,6 +146,16 @@ F_decode = F_sliding_decode + F_csa_decode + F_hca_decode
 - CSA indexer attention 按当前 Query 扫描 `floor(S_ctx / m_csa)` 个压缩历史块计算。
 - 汇总结果直接用于 `decode_compute_ceiling`，不再使用整体工程近似式。
 
+DeepSeek V4 的每 token 权重读取量与常驻权重显存分开计算：
+
+```text
+B_weights = N_non * 10^9 * bpw
+          + N_exp * 10^9 * (k / E) * bpe
+```
+
+非专家权重每个 token 全量读取，专家权重只按当前 token 激活的 `k / E`
+比例计入；不得用包含全部专家的 `M_weights` 代替每 token 权重流量。
+
 ### 5.4 Decode 阶段内存需求公式
 
 必须单独成章，且必须考虑权重：
@@ -224,3 +238,9 @@ FP8版本的公式操作数与Base相同；公式说明需要额外标注E4M3动
 `Qwen3.6-27B`的Prefill追溯必须把Full GQA、Gated DeltaNet
 和Dense SwiGLU分开；Decode追溯使用全部dense权重流量，不显示active
 expert fraction。详细依据见`docs/Qwen_3.6/Qwen3.6-27B-FP8.md`。
+
+Hybrid Decode 公式追踪必须分别列出 Full GQA 算子、Gated DeltaNet 算子以及
+Dense FFN 或 MoE，不得使用 `per-section summed` 占位。Dense 权重读取使用
+`N_text * 10^9 * bpw`，MoE 使用非专家全量与 `k/E` 激活专家比例。常驻 linear
+state 的 recurrent 部分按 FP32（`2e`）展示，临时工作集必须包含
+`(S_ctx + 1)` 与显式元素字节数 `e`。

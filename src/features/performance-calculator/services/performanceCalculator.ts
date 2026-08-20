@@ -1050,6 +1050,10 @@ function buildDenseFormulaTrace(
   const isDenseMoe = model.formulaStrategyId === "dense-decoder-moe";
   const slidingLayers = model.slidingAttentionLayerCount ?? model.slidingLayerCount;
   const fullLayers = model.fullAttentionLayerCount ?? 0;
+  const independentSliding = model.independentSlidingAttentionLayerCount ?? slidingLayers;
+  const independentFull = model.independentFullAttentionLayerCount ?? fullLayers;
+  const sharedSliding = slidingLayers - independentSliding;
+  const sharedFull = fullLayers - independentFull;
   const cFull = model.globalHeadDim ?? model.headDim;
   const nKvFull = model.numGlobalKeyValueHeads ?? model.kvHeads;
   const pleFlops = densePleFlops(model, workload.prefillTokenLength);
@@ -1058,6 +1062,20 @@ function buildDenseFormulaTrace(
   const baseMlpFlops = denseFlopsMlp(model, workload.prefillTokenLength);
   const sharedMlpMultiplier = model.doubleWideMlpInKvSharedLayers ? 2 : 1;
   const sharedMlpFlops = denseFlopsMlp(model, workload.prefillTokenLength, sharedMlpMultiplier);
+  const slidingIndependentPrefill = denseLayerBreakdown(
+    model, workload.prefillTokenLength, model.slidingWindow, model.headDim, model.kvHeads, true, 4
+  );
+  const slidingSharedPrefill = denseLayerBreakdown(
+    model, workload.prefillTokenLength, model.slidingWindow, model.headDim, model.kvHeads, true, 4, false, sharedMlpMultiplier
+  );
+  const fullIndependentPrefill = denseLayerBreakdown(
+    model, workload.prefillTokenLength, workload.prefillTokenLength, cFull, nKvFull,
+    !(model.attentionKEqV ?? false), 2
+  );
+  const fullSharedPrefill = denseLayerBreakdown(
+    model, workload.prefillTokenLength, workload.prefillTokenLength, cFull, nKvFull,
+    !(model.attentionKEqV ?? false), 2, false, sharedMlpMultiplier
+  );
   const decodeWeight = computeDecodeWeightBreakdown(model, platform);
   const decodeFlops = denseDecodeFlopsBreakdown(
     model,
@@ -1074,9 +1092,6 @@ function buildDenseFormulaTrace(
     result.decodeCsaLkv
   );
 
-  const slidingTotal = result.slidingLayer.total * slidingLayers;
-  const fullTotal = result.csaLayer.total * fullLayers;
-
   return [
     {
       category: "prefill",
@@ -1092,15 +1107,20 @@ function buildDenseFormulaTrace(
           evaluated: `${formatTflops(result.csaLayer.q)} per layer × ${fullLayers} = ${formatTflops(result.csaLayer.q * fullLayers)}`
         },
         {
-          label: "Sliding layer KV proj FLOPs",
+          label: "Sliding independent-KV projection FLOPs",
           expression: "2 · S · D · n_kv_s · c_s · 2",
-          evaluated: `${formatTflops(result.slidingLayer.kvProj)} per layer × ${slidingLayers} = ${formatTflops(result.slidingLayer.kvProj * slidingLayers)}`
+          evaluated: `${formatTflops(slidingIndependentPrefill.kvProj)} per layer × ${independentSliding} = ${formatTflops(slidingIndependentPrefill.kvProj * independentSliding)}`
         },
         {
-          label: "Full layer KV proj FLOPs",
+          label: "Full independent-KV projection FLOPs",
           expression: `2 · S · D · n_kv_f(${nKvFull}) · c_f(${cFull}) · (1 + has_v_proj)`,
-          evaluated: `${formatTflops(result.csaLayer.kvProj)} per layer × ${fullLayers} = ${formatTflops(result.csaLayer.kvProj * fullLayers)}`
+          evaluated: `${formatTflops(fullIndependentPrefill.kvProj)} per layer × ${independentFull} = ${formatTflops(fullIndependentPrefill.kvProj * independentFull)}`
         },
+        ...((sharedSliding + sharedFull) > 0 ? [{
+          label: "Shared-KV layer projection FLOPs",
+          expression: "F_KV_shared = 0",
+          evaluated: `0 FLOPs × ${sharedSliding + sharedFull} shared-KV layers`
+        }] : []),
         {
           label: "Sliding core attention FLOPs",
           expression: "4 · S · n_win · n_h · c_s  (QKᵀ + AV)",
@@ -1148,19 +1168,31 @@ function buildDenseFormulaTrace(
           expression: "2 * S * D * (L * P) + L * 4 * S * D * P",
           evaluated: formatTflops(pleFlops)
         }] : []),
-        {
-          label: "Sliding layer total",
-          expression: "F_Q + F_KV + F_core + F_O + F_MLP",
-          evaluated: `${formatTflops(result.slidingLayer.total)} per layer × ${slidingLayers} = ${formatTflops(slidingTotal)}`
-        },
-        {
-          label: "Full layer total",
-          expression: "F_Q + F_KV + F_core + F_O + F_MLP",
-          evaluated: `${formatTflops(result.csaLayer.total)} per layer × ${fullLayers} = ${formatTflops(fullTotal)}`
-        },
+        ...(independentSliding > 0 ? [{
+          label: "Sliding independent-KV layers total",
+          expression: "F_si = L_si · (F_Q + F_KV + F_core + F_O + F_MLP)",
+          evaluated: `${formatTflops(slidingIndependentPrefill.total)} per layer × ${independentSliding} = ${formatTflops(slidingIndependentPrefill.total * independentSliding)}`
+        }] : []),
+        ...(sharedSliding > 0 ? [{
+          label: "Sliding shared-KV layers total",
+          expression: "F_ss = L_ss · (F_Q + F_core + F_O + F_MLP_shared)",
+          evaluated: `${formatTflops(slidingSharedPrefill.total)} per layer × ${sharedSliding} = ${formatTflops(slidingSharedPrefill.total * sharedSliding)}`
+        }] : []),
+        ...(independentFull > 0 ? [{
+          label: "Full independent-KV layers total",
+          expression: "F_fi = L_fi · (F_Q + F_KV + F_core + F_O + F_MLP)",
+          evaluated: `${formatTflops(fullIndependentPrefill.total)} per layer × ${independentFull} = ${formatTflops(fullIndependentPrefill.total * independentFull)}`
+        }] : []),
+        ...(sharedFull > 0 ? [{
+          label: "Full shared-KV layers total",
+          expression: "F_fs = L_fs · (F_Q + F_core + F_O + F_MLP_shared)",
+          evaluated: `${formatTflops(fullSharedPrefill.total)} per layer × ${sharedFull} = ${formatTflops(fullSharedPrefill.total * sharedFull)}`
+        }] : []),
         {
           label: "Prefill Total FLOPs",
-          expression: "L_sliding · F_sliding + L_full · F_full",
+          expression: pleFlops > 0
+            ? "F_prefill = F_si + F_ss + F_fi + F_fs + F_PLE"
+            : "F_prefill = F_si + F_ss + F_fi + F_fs",
           evaluated: `${formatTflops(result.prefillFlops)}`
         }
       ]
@@ -1274,12 +1306,12 @@ function buildDenseFormulaTrace(
         {
           label: "Persistent sliding cache (per layer)",
           expression: "B · e · n_win · n_kv_s · c_s · 2 (K+V)",
-          evaluated: `${formatMb(result.persistentSlidingCacheBytes)} × ${slidingLayers} layers = ${formatMb(result.persistentSlidingCacheTotalBytes)}`
+          evaluated: `${formatMb(result.persistentSlidingCacheBytes)} × ${independentSliding} independent-KV layers = ${formatMb(result.persistentSlidingCacheTotalBytes)}`
         },
         {
           label: "Persistent full cache (per layer)",
           expression: "B · e · S_ctx · n_kv_f · c_f · 2 (K+V, torch.cat separate)",
-          evaluated: `${formatMb(result.persistentCsaCacheBytes)} × ${fullLayers} layers = ${formatMb(result.persistentCsaCacheTotalBytes)}`
+          evaluated: `${formatMb(result.persistentCsaCacheBytes)} × ${independentFull} independent-KV layers = ${formatMb(result.persistentCsaCacheTotalBytes)}`
         },
         {
           label: "Persistent Decode Cache",
@@ -1681,7 +1713,7 @@ function buildFormulaTrace(
         },
         {
           label: "Decode weight bytes per token",
-          expression: "B_weights ~= M_weights",
+          expression: "B_weights = N_non · 10^9 · bpw + N_exp · 10^9 · (k / E) · bpe",
           evaluated: formatMb(result.decodeWeightBytes)
         },
         {
@@ -2080,12 +2112,41 @@ function buildHybridFormulaTrace(
   const n_vhL = model.linearNumValueHeads ?? 0;
   const c_kL = model.linearKeyHeadDim ?? 0;
   const c_vL = model.linearValueHeadDim ?? 0;
+  const n_h = model.attentionHeads;
+  const n_kv = model.kvHeads;
+  const c = model.headDim;
+  const D = model.hiddenSize;
+  const n_khL = model.linearNumKeyHeads ?? 0;
+  const convK = model.linearConvKernelDim ?? 0;
+  const keyDim = n_khL * c_kL;
+  const valueDim = n_vhL * c_vL;
+  const convDim = 2 * keyDim + valueDim;
   const isDenseHybrid = model.formulaStrategyId === "hybrid-linear-dense";
+  const I = isDenseHybrid
+    ? (model.intermediateSize ?? model.moeIntermediateSize)
+    : model.moeIntermediateSize;
+  const k = isDenseHybrid ? 0 : model.activeExperts;
   const ffnLabel = isDenseHybrid ? "Dense SwiGLU FFN FLOPs" : "MoE FLOPs (all layers, SwiGLU)";
   const ffnExpression = isDenseHybrid ? "6 · S · D · I" : "6 · S · D · I · (k + 1)";
 
   const fullTotal = result.csaLayer.total * fullLayers;
   const linearTotal = result.hcaLayer.total * linearLayers;
+  const decodeFullOperatorsPerLayer =
+    2 * D * (2 * n_h * c) +
+    2 * D * n_kv * c * 2 +
+    4 * workload.prefillTokenLength * n_h * c +
+    2 * n_h * c * D;
+  const decodeLinearOperatorsPerLayer =
+    2 * D * convDim +
+    2 * D * valueDim +
+    2 * D * (2 * n_vhL) +
+    2 * convK * convDim +
+    2 * n_vhL * c_kL * c_vL +
+    2 * valueDim * D;
+  const decodeFfnPerLayer = 6 * D * I * (k + 1);
+  const decodeFullTotal = fullLayers * decodeFullOperatorsPerLayer;
+  const decodeLinearTotal = linearLayers * decodeLinearOperatorsPerLayer;
+  const decodeFfnTotal = model.decoderLayers * decodeFfnPerLayer;
 
   return [
     {
@@ -2192,7 +2253,9 @@ function buildHybridFormulaTrace(
         },
         {
           label: "Decode weight bytes per token",
-          expression: "B_weights = N_non · bpw + N_exp · (k/E) · bpe",
+          expression: isDenseHybrid
+            ? "B_weights = N_text · 10^9 · bpw"
+            : "B_weights = N_non · 10^9 · bpw + N_exp · 10^9 · (k / E) · bpe",
           evaluated: formatMb(result.decodeWeightBytes)
         },
         {
@@ -2201,9 +2264,30 @@ function buildHybridFormulaTrace(
           evaluated: `${formatMb(result.decodeWeightBytes)} + ${formatMb(result.decodeCacheBytes)} = ${formatMb(result.decodeBytes)}`
         },
         {
-          label: "Decode compute FLOPs per token (full+linear+MoE)",
-          expression: "per-section summed",
-          evaluated: formatGflops(result.decodeComputeFlopsPerToken)
+          label: "Decode Full GQA operator FLOPs",
+          expression: "F_full_decode = L_full · (F_Qgate + F_KV + F_core + F_O)",
+          evaluated: `${formatGflops(decodeFullOperatorsPerLayer)} per layer × ${fullLayers} = ${formatGflops(decodeFullTotal)}`
+        },
+        {
+          label: "Decode Gated DeltaNet operator FLOPs",
+          expression: "F_linear_decode = L_linear · (F_inproj + F_conv + F_scan + F_O)",
+          evaluated: `${formatGflops(decodeLinearOperatorsPerLayer)} per layer × ${linearLayers} = ${formatGflops(decodeLinearTotal)}`
+        },
+        {
+          label: isDenseHybrid ? "Decode Dense FFN FLOPs" : "Decode MoE FLOPs",
+          expression: isDenseHybrid
+            ? "F_FFN_decode = L · 6 · D · I"
+            : "F_MoE_decode = L · 6 · D · I · (k + 1)",
+          evaluated: `${formatGflops(decodeFfnPerLayer)} per layer × ${model.decoderLayers} = ${formatGflops(decodeFfnTotal)}`
+        },
+        {
+          label: isDenseHybrid
+            ? "Decode compute FLOPs per token (Full GQA + Gated DeltaNet + Dense FFN)"
+            : "Decode compute FLOPs per token (Full GQA + Gated DeltaNet + MoE)",
+          expression: isDenseHybrid
+            ? "F_decode = F_full_decode + F_linear_decode + F_FFN_decode"
+            : "F_decode = F_full_decode + F_linear_decode + F_MoE_decode",
+          evaluated: `${formatGflops(decodeFullTotal)} + ${formatGflops(decodeLinearTotal)} + ${formatGflops(decodeFfnTotal)} = ${formatGflops(result.decodeComputeFlopsPerToken)}`
         },
         {
           label: "Decode compute ceiling",
@@ -2239,7 +2323,7 @@ function buildHybridFormulaTrace(
         },
         {
           label: "Linear attention state (per layer)",
-          expression: "B · (conv_state + recurrent_state) · bytes_per_elem",
+          expression: "B · conv_dim · kernel · e + B · n_v_heads · c_kL · c_vL · (2e)",
           evaluated: `${formatMb(result.persistentHcaCacheBytes)} × ${linearLayers} = ${formatMb(result.persistentHcaCacheTotalBytes)}`
         },
         {
@@ -2249,7 +2333,7 @@ function buildHybridFormulaTrace(
         },
         {
           label: "Single-step Temp Peak",
-          expression: "B · 2 · 2 · n_h · S_ctx · c (repeat_kv)",
+          expression: "M_tmp = B · 2 · n_h · (S_ctx + 1) · c · e",
           evaluated: `${formatMb(result.tmpPeakBytes)}; L_kv = ${result.tmpPeakLkv}`
         },
         {

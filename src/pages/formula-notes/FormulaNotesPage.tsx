@@ -75,6 +75,7 @@ const traceVariableCatalog: Record<string, TraceVariableDefinition> = {
   L_kv: { symbol: "L_kv", meaning: "单步 Decode 实际读取的 KV 可见长度。", source: "由上下文与模型结构派生" },
   L_kv_decode: { symbol: "L_kv_decode", meaning: "Decode 阶段的有效 KV 可见长度。", source: "由上下文与模型结构派生" },
   F_Q: { symbol: "F_Q", meaning: "Query 路径的 FLOPs。", source: "公式派生" },
+  F_Qgate: { symbol: "F_Qgate", meaning: "Full GQA 当前 token 的 Query 与 gate 联合投影 FLOPs。", source: "Full GQA 投影公式派生" },
   F_KV: { symbol: "F_KV", meaning: "Key/Value 投影的 FLOPs。", source: "公式派生" },
   F_core: { symbol: "F_core", meaning: "Attention 核心计算的 FLOPs。", source: "公式派生" },
   F_core_sliding: { symbol: "F_core_sliding", meaning: "单个 Sliding 层处理当前 token 时，QKᵀ 与 AV 两趟 Attention core 的 FLOPs。", source: "Sliding Decode 可见长度与 Attention 维度派生" },
@@ -84,12 +85,14 @@ const traceVariableCatalog: Record<string, TraceVariableDefinition> = {
   F_MLP: { symbol: "F_MLP", meaning: "Dense MLP 的 FLOPs。", source: "公式派生" },
   F_PLE: { symbol: "F_PLE", meaning: "Per-Layer Embeddings 全局投影及所有逐层门控/投影的 FLOPs。", source: "PLE 公式派生" },
   F_decode: { symbol: "F_decode", meaning: "生成一个 token 时，当前 Gemma decoder 执行的总浮点运算量。", source: "由各类 decoder 层 FLOPs 与 PLE FLOPs 汇总" },
-  F_si: { symbol: "F_si", meaning: "所有 Sliding Attention 独立 KV 层在单步 Decode 中的 FLOPs，包含 Q/K/V、Attention core、输出投影及 MLP/MoE。", source: "由模型层 schedule 与 Decode 公式派生" },
-  F_ss: { symbol: "F_ss", meaning: "所有 Sliding Attention 共享 KV 层在单步 Decode 中的 FLOPs；这些层复用 KV，因此不重复计算 K/V 投影。", source: "由模型层 schedule 与 Decode 公式派生" },
-  F_fi: { symbol: "F_fi", meaning: "所有 Full Attention 独立 KV 层在单步 Decode 中的 FLOPs，包含 Q/K/V、Attention core、输出投影及 MLP/MoE。", source: "由模型层 schedule 与 Decode 公式派生" },
-  F_fs: { symbol: "F_fs", meaning: "所有 Full Attention 共享 KV 层在单步 Decode 中的 FLOPs；这些层复用 KV，因此不重复计算 K/V 投影。", source: "由模型层 schedule 与 Decode 公式派生" },
+  F_si: { symbol: "F_si", meaning: "当前 Prefill 或 Decode 阶段中，所有 Sliding Attention 独立 KV 层的 FLOPs 总和。", source: "由模型层 schedule 与当前阶段公式派生" },
+  F_ss: { symbol: "F_ss", meaning: "当前阶段所有 Sliding Attention 共享 KV 层的 FLOPs 总和；这些层复用 KV，不重复计算 K/V 投影。", source: "由模型层 schedule 与当前阶段公式派生" },
+  F_fi: { symbol: "F_fi", meaning: "当前 Prefill 或 Decode 阶段中，所有 Full Attention 独立 KV 层的 FLOPs 总和。", source: "由模型层 schedule 与当前阶段公式派生" },
+  F_fs: { symbol: "F_fs", meaning: "当前阶段所有 Full Attention 共享 KV 层的 FLOPs 总和；这些层复用 KV，不重复计算 K/V 投影。", source: "由模型层 schedule 与当前阶段公式派生" },
   F_MoE: { symbol: "F_MoE", meaning: "MoE 前馈路径的 FLOPs。", source: "公式派生" },
+  F_MoE_decode: { symbol: "F_MoE_decode", meaning: "全部 Hybrid decoder 层生成一个 token 的 MoE FLOPs 总和。", source: "单层激活专家 FLOPs 乘 decoder 层数" },
   F_FFN: { symbol: "F_FFN", meaning: "Dense FFN 路径的 FLOPs。", source: "公式派生" },
+  F_FFN_decode: { symbol: "F_FFN_decode", meaning: "全部 Hybrid decoder 层生成一个 token 的 Dense FFN FLOPs 总和。", source: "单层 Dense FFN FLOPs 乘 decoder 层数" },
   F_compressor: { symbol: "F_compressor", meaning: "Token compressor 的 FLOPs。", source: "公式派生" },
   F_indexer: { symbol: "F_indexer", meaning: "CSA indexer 的 FLOPs。", source: "公式派生" },
   F_compressor_csa: { symbol: "F_compressor_csa", meaning: "单个 CSA 层对当前 token 执行 compressor 路径的 FLOPs。", source: "CSA compressor 公式派生" },
@@ -107,6 +110,8 @@ const traceVariableCatalog: Record<string, TraceVariableDefinition> = {
   F_hca_decode: { symbol: "F_hca_decode", meaning: "全部 HCA 层生成一个 token 的 FLOPs 总和。", source: "HCA 层逐算子结果乘层数后汇总" },
   F_full: { symbol: "F_full", meaning: "单个 Full Attention 层的总 FLOPs。", source: "公式派生" },
   F_linear: { symbol: "F_linear", meaning: "单个 Linear Attention 层的总 FLOPs。", source: "公式派生" },
+  F_full_decode: { symbol: "F_full_decode", meaning: "全部 Full GQA 层生成一个 token 的 Attention 算子 FLOPs，不含 FFN/MoE。", source: "Full GQA Decode 逐算子结果乘层数" },
+  F_linear_decode: { symbol: "F_linear_decode", meaning: "全部 Gated DeltaNet 层生成一个 token 的线性注意力算子 FLOPs，不含 FFN/MoE。", source: "Gated DeltaNet Decode 逐算子结果乘层数" },
   F_tmp: { symbol: "F_tmp", meaning: "当前步骤的临时计算量。", source: "公式派生" },
   FLOPs_per_token: { symbol: "FLOPs_per_token", meaning: "生成一个 token 所需的估算 FLOPs。", source: "公式派生" },
   effective_compute: { symbol: "effective_compute", meaning: "计入效率系数后的有效算力。", source: "平台参数" },
@@ -306,6 +311,7 @@ function getPrefillFormulaGuide(model: ModelDefinition): PrefillFormulaGuide {
   const guide = prefillFormulaGuides[model.formulaStrategyId];
   if (model.formulaStrategyId !== "dense-decoder-transformer") return guide;
 
+  const hasPle = (model.perLayerEmbeddingSize ?? 0) > 0;
   const sharedLayers = model.kvSharedLayerCount ?? 0;
   const baseLayers = model.decoderLayers - sharedLayers;
   const I = model.intermediateSize ?? 0;
@@ -313,7 +319,17 @@ function getPrefillFormulaGuide(model: ModelDefinition): PrefillFormulaGuide {
 
   return {
     ...guide,
-    expression: `${guide.expression}
+    expression: `${hasPle ? guide.expression : `F_prefill = L_sliding * F_sliding
+          + L_full * F_full
+
+F_layer = F_Q + F_KV + F_attention
+        + F_O + F_MLP
+F_attention_sliding = 4 * S * Lkv * n_h * c
+F_attention_full = 2 * S^2 * n_h * c
+F_KV(shared layer) = 0
+F_MLP = 6 * S * D * I_layer
+I_layer = I                    (base / independent-KV layer)
+I_layer = 2 * I                (shared-KV layer when double-wide is enabled)`}
 
 Current model:
 L_base = ${baseLayers}, I_base = ${I}
@@ -326,7 +342,10 @@ F_MLP_total = 6 * S * D * (${baseLayers} * ${I} + ${sharedLayers} * ${sharedWidt
         : sharedLayers > 0
           ? `当前 ${model.displayName} 虽有 ${sharedLayers} 个 KV 共享层，但这些层仍使用基础 MLP 宽度 I = ${I}。`
           : `当前 ${model.displayName} 所有层均使用基础 MLP 宽度 I = ${I}。`
-    ]
+    ],
+    variables: hasPle
+      ? guide.variables
+      : guide.variables.filter((variable) => !["F_PLE", "P"].includes(variable.symbol))
   };
 }
 

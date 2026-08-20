@@ -212,6 +212,8 @@ DeepSeek V4 Decode 算力口径按 Sliding、CSA、HCA 三类层逐算子计算�
 Q、KV、Attention core、输出投影与 MoE；CSA 额外包含 compressor、indexer linear
 和 indexer attention，HCA 额外包含 compressor。三类层按各自层数汇总后直接形成
 `decodeComputeFlopsPerToken`，不使用整体 MLP 工程近似。
+Decode 权重带宽采用“非专家权重全量 + 激活专家比例”的每 token 读取口径，
+与包含全部专家权重的常驻 `M_weights` 分开，不允许二者互相替代。
 
 注意：未知 `formulaStrategyId` 会抛错，避免未实现策略被错误套用到其他模型上。
 
@@ -232,6 +234,14 @@ Q、KV、Attention core、输出投影与 MoE；CSA 额外包含 compressor、in
 - Decode FLOPs 不是单独的 `6 * D * I` MLP 估算，而是按 independent/shared
   sliding attention、independent/shared full attention、各层 MLP/MoE 和 PLE
   分项求和；KV 共享层不重复计算 KV projection，双宽 MLP 层使用模型定义中的倍数。
+- Prefill 追踪同样按 independent/shared × sliding/full 四类层展示；持久 KV cache
+  只乘拥有 K/V 的 independent 层数。`perLayerEmbeddingSize = 0` 时不展示 PLE 公式。
+
+Hybrid Qwen 的 Decode 追踪按 Full GQA、Gated DeltaNet 和 FFN 分项求和：Dense
+模型显示 Dense FFN，MoE 模型显示 active-expert MoE。权重参数量以 B 为单位时必须
+乘 `10^9`；Gated DeltaNet 常驻 recurrent state 使用 `2 * Bytes/Activation`
+表示 FP32，而单 token 状态流量仍按计算引擎中的 `Bytes/Activation` 口径。Full GQA
+临时工作集使用 `B * 2 * n_h * (S_ctx + 1) * c * e`。
 
 ## 7. 添加新模型的推荐流程
 
