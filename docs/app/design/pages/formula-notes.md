@@ -130,7 +130,17 @@ TPS_decode
     )
 ```
 
-首版实现采用工程近似，后续需要继续细化逐算子 decode FLOPs。
+DeepSeek V4 的 Decode FLOPs 按实际结构逐算子展开：
+
+```text
+F_decode = F_sliding_decode + F_csa_decode + F_hca_decode
+```
+
+- 三类层均计算当前 token 的 Q、KV、Attention core、输出投影和 MoE。
+- CSA 额外计算 compressor、indexer linear 和 indexer attention。
+- HCA 额外计算 compressor；Sliding 不包含 compressor 或 indexer。
+- CSA indexer attention 按当前 Query 扫描 `floor(S_ctx / m_csa)` 个压缩历史块计算。
+- 汇总结果直接用于 `decode_compute_ceiling`，不再使用整体工程近似式。
 
 ### 5.4 Decode 阶段内存需求公式
 

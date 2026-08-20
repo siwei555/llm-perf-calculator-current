@@ -208,6 +208,11 @@ compressed-MoE 模板按 Sparse MoE、Sliding、CSA、HCA 拆分，并在对应�
 - single-step temp peak memory
 - runtime overhead
 
+DeepSeek V4 Decode 算力口径按 Sliding、CSA、HCA 三类层逐算子计算：三类层均包含
+Q、KV、Attention core、输出投影与 MoE；CSA 额外包含 compressor、indexer linear
+和 indexer attention，HCA 额外包含 compressor。三类层按各自层数汇总后直接形成
+`decodeComputeFlopsPerToken`，不使用整体 MLP 工程近似。
+
 注意：未知 `formulaStrategyId` 会抛错，避免未实现策略被错误套用到其他模型上。
 
 `dense-decoder-moe` 用于 Gemma 4 这类 sliding/full attention + routed MoE FFN 架构：
@@ -216,6 +221,17 @@ compressed-MoE 模板按 Sparse MoE、Sliding、CSA、HCA 拆分，并在对应�
 - FFN FLOPs 使用 `6 * S * D * moe_intermediate_size * (activeExperts + 1)`。
 - Decode 权重读取按非专家全量 + active expert fraction 估算。
 - KV cache 分为 sliding window cache 和 full attention cache。
+
+`dense-decoder-transformer` 与 `dense-decoder-moe` 的 Decode 说明必须直接反映计算引擎口径：
+
+- 每 token 权重读取以 `textBackboneParamsB` 为作用域，先扣除
+  `tokenLookupParamsB`；embedding 与 PLE lookup 只计当前 token 实际读取的行，
+  不把整张 lookup 表计入每 token 带宽。
+- Dense 模型按剩余文本骨干权重读取；MoE 模型再把专家权重按
+  `activeExperts / moeExperts` 折算，并使用 `Bytes / Expert`。
+- Decode FLOPs 不是单独的 `6 * D * I` MLP 估算，而是按 independent/shared
+  sliding attention、independent/shared full attention、各层 MLP/MoE 和 PLE
+  分项求和；KV 共享层不重复计算 KV projection，双宽 MLP 层使用模型定义中的倍数。
 
 ## 7. 添加新模型的推荐流程
 

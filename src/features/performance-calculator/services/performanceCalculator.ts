@@ -160,7 +160,7 @@ function computeWeightGb(model: ModelDefinition, platform: PlatformInput): numbe
   return nonexpertB * platform.bytesPerWeight + expertB * platform.bytesPerExpert;
 }
 
-function computeDecodeWeightBytes(model: ModelDefinition, platform: PlatformInput): number {
+function computeDecodeWeightBreakdown(model: ModelDefinition, platform: PlatformInput) {
   const textParamsB = model.textBackboneParamsB ?? model.totalParamsB;
   const lookupParamsB = Math.min(model.tokenLookupParamsB ?? 0, textParamsB);
   const lookupValuesPerToken = model.hiddenSize +
@@ -172,11 +172,26 @@ function computeDecodeWeightBytes(model: ModelDefinition, platform: PlatformInpu
     ? model.activeExperts / model.moeExperts
     : 1;
 
-  return (
-    nonExpertDenseB * 1_000_000_000 * platform.bytesPerWeight +
-    expertB * 1_000_000_000 * activeExpertFraction * platform.bytesPerExpert +
-    lookupBytesPerToken
-  );
+  const denseWeightBytes = nonExpertDenseB * 1_000_000_000 * platform.bytesPerWeight;
+  const activeExpertWeightBytes =
+    expertB * 1_000_000_000 * activeExpertFraction * platform.bytesPerExpert;
+
+  return {
+    textParamsB,
+    lookupParamsB,
+    nonExpertDenseB,
+    expertB,
+    activeExpertFraction,
+    lookupValuesPerToken,
+    denseWeightBytes,
+    activeExpertWeightBytes,
+    lookupBytesPerToken,
+    totalBytes: denseWeightBytes + activeExpertWeightBytes + lookupBytesPerToken
+  };
+}
+
+function computeDecodeWeightBytes(model: ModelDefinition, platform: PlatformInput): number {
+  return computeDecodeWeightBreakdown(model, platform).totalBytes;
 }
 
 function formatTflops(value: number) {
@@ -201,6 +216,16 @@ function formatLayerContribution(
   }
 
   return `${formatTflops(layer[key])} x ${layerCount} = ${formatTflops(layer[key] * layerCount)}`;
+}
+
+function formatDecodeOperatorContribution(
+  layer: LayerBreakdown,
+  layerCount: number,
+  key: keyof LayerBreakdown
+) {
+  return `${formatGflops(layer[key])} per layer × ${layerCount} = ${formatGflops(
+    layer[key] * layerCount
+  )}`;
 }
 
 function inferBottleneck(
@@ -328,6 +353,50 @@ function layerBreakdown(
   const total = q + kvProj + core + compressor + indexerLin + indexerAttn + output + moe;
 
   return { q, kvProj, core, compressor, indexerLin, indexerAttn, output, moe, total };
+}
+
+function decodeLayerBreakdown(
+  model: ModelDefinition,
+  contextLength: number,
+  layerType: "sliding" | "csa" | "hca"
+): LayerBreakdown {
+  const q = flopsQ(model, 1);
+  const kvProj = flopsKvProj(model, 1);
+  const visibleLength = layerType === "sliding"
+    ? model.slidingWindow
+    : layerType === "csa"
+      ? decodeCsaLkv(model, contextLength)
+      : decodeHcaLkv(model, contextLength);
+  const core = 4 * visibleLength * model.attentionHeads * model.headDim;
+  const compressor = flopsCompressor(model, 1, layerType);
+  const indexerLin = layerType === "csa" ? flopsIndexerLin(model, 1) : 0;
+  const indexerAttn = layerType === "csa"
+    ? Math.floor(contextLength / model.csaCompressRate) * model.indexHeads * model.indexHeadDim
+    : 0;
+  const output = flopsOutput(model, 1);
+  const moe = flopsMoe(model, 1);
+  const total = q + kvProj + core + compressor + indexerLin + indexerAttn + output + moe;
+
+  return { q, kvProj, core, compressor, indexerLin, indexerAttn, output, moe, total };
+}
+
+function deepSeekDecodeFlopsBreakdown(model: ModelDefinition, contextLength: number) {
+  const sliding = decodeLayerBreakdown(model, contextLength, "sliding");
+  const csa = decodeLayerBreakdown(model, contextLength, "csa");
+  const hca = decodeLayerBreakdown(model, contextLength, "hca");
+  const slidingTotal = model.slidingLayerCount * sliding.total;
+  const csaTotal = model.csaLayerCount * csa.total;
+  const hcaTotal = model.hcaLayerCount * hca.total;
+
+  return {
+    sliding,
+    csa,
+    hca,
+    slidingTotal,
+    csaTotal,
+    hcaTotal,
+    total: slidingTotal + csaTotal + hcaTotal
+  };
 }
 
 function decodeCacheBytes(
@@ -542,7 +611,7 @@ function denseCacheBytesPerLayer(
   return batchSize * e * lkv * nKv * headDim * 2;
 }
 
-function denseDecodeFlopsPerToken(
+function denseDecodeFlopsBreakdown(
   model: ModelDefinition,
   contextLength: number,
   slidingLayers: number,
@@ -577,13 +646,58 @@ function denseDecodeFlopsPerToken(
   const baseMlp = denseFlopsMlp(model, 1);
   const sharedMlp = denseFlopsMlp(model, 1, sharedMlpMultiplier);
 
-  return (
-    independentSliding * (slidingQ + slidingKv + slidingCore + slidingOutput + baseMlp) +
-    sharedSliding * (slidingQ + slidingCore + slidingOutput + sharedMlp) +
-    independentFull * (fullQ + fullKv + fullCore + fullOutput + baseMlp) +
-    sharedFull * (fullQ + fullCore + fullOutput + sharedMlp) +
-    densePleFlops(model, 1)
-  );
+  const slidingIndependent =
+    independentSliding * (slidingQ + slidingKv + slidingCore + slidingOutput + baseMlp);
+  const slidingShared =
+    sharedSliding * (slidingQ + slidingCore + slidingOutput + sharedMlp);
+  const fullIndependent =
+    independentFull * (fullQ + fullKv + fullCore + fullOutput + baseMlp);
+  const fullShared =
+    sharedFull * (fullQ + fullCore + fullOutput + sharedMlp);
+  const ple = densePleFlops(model, 1);
+
+  return {
+    independentSliding,
+    sharedSliding,
+    independentFull,
+    sharedFull,
+    slidingIndependent,
+    slidingShared,
+    fullIndependent,
+    fullShared,
+    ple,
+    total: slidingIndependent + slidingShared + fullIndependent + fullShared + ple
+  };
+}
+
+function denseDecodeFlopsPerToken(
+  model: ModelDefinition,
+  contextLength: number,
+  slidingLayers: number,
+  fullLayers: number,
+  cSliding: number,
+  cFull: number,
+  nKvSliding: number,
+  nKvFull: number,
+  hasVProjSliding: boolean,
+  hasVProjFull: boolean,
+  decodeSlidingLkv: number,
+  decodeFullLkv: number
+) {
+  return denseDecodeFlopsBreakdown(
+    model,
+    contextLength,
+    slidingLayers,
+    fullLayers,
+    cSliding,
+    cFull,
+    nKvSliding,
+    nKvFull,
+    hasVProjSliding,
+    hasVProjFull,
+    decodeSlidingLkv,
+    decodeFullLkv
+  ).total;
 }
 
 function computeDenseFullResult(
@@ -876,9 +990,10 @@ function computeFullResult(
     nonExpertB * 1_000_000_000 * platform.bytesPerWeight +
     expertB * 1_000_000_000 * activeExpertFraction * platform.bytesPerExpert;
   const decodeBytes = decodeWeightBytes + decodeCacheTrafficBytes;
-  const decodeComputeFlopsPerToken =
-    (model.decoderLayers * model.hiddenSize * model.moeIntermediateSize * (model.activeExperts + 1)) /
-    3;
+  const decodeComputeFlopsPerToken = deepSeekDecodeFlopsBreakdown(
+    model,
+    workload.prefillTokenLength
+  ).total;
   const decodeComputeTps = effectiveCompute / decodeComputeFlopsPerToken;
   const decodeBandwidthTps = effectiveBandwidth / decodeBytes;
   const prefillTps = Math.min(prefillComputeTps, prefillBandwidthTps);
@@ -928,6 +1043,7 @@ function computeFullResult(
 
 function buildDenseFormulaTrace(
   model: ModelDefinition,
+  platform: PlatformInput,
   workload: WorkloadInput,
   result: FullComputation
 ): FormulaTraceSection[] {
@@ -942,6 +1058,21 @@ function buildDenseFormulaTrace(
   const baseMlpFlops = denseFlopsMlp(model, workload.prefillTokenLength);
   const sharedMlpMultiplier = model.doubleWideMlpInKvSharedLayers ? 2 : 1;
   const sharedMlpFlops = denseFlopsMlp(model, workload.prefillTokenLength, sharedMlpMultiplier);
+  const decodeWeight = computeDecodeWeightBreakdown(model, platform);
+  const decodeFlops = denseDecodeFlopsBreakdown(
+    model,
+    workload.prefillTokenLength,
+    slidingLayers,
+    fullLayers,
+    model.headDim,
+    cFull,
+    model.kvHeads,
+    nKvFull,
+    true,
+    !(model.attentionKEqV ?? false),
+    result.decodeSlidingLkv,
+    result.decodeCsaLkv
+  );
 
   const slidingTotal = result.slidingLayer.total * slidingLayers;
   const fullTotal = result.csaLayer.total * fullLayers;
@@ -1069,9 +1200,25 @@ function buildDenseFormulaTrace(
         {
           label: "Decode weight bytes per token",
           expression: isDenseMoe
-            ? "B_weights = N_non · bpw + N_exp · (k / E) · bpe"
-            : "B_weights = M_weights · 10^9",
-          evaluated: formatMb(result.decodeWeightBytes)
+            ? "B_weights = (N_text - N_lookup - N_exp) · 10^9 · bpw + N_exp · 10^9 · (k / E) · bpe + (D + L · P) · bpw"
+            : "B_weights = (N_text - N_lookup) · 10^9 · bpw + (D + L · P) · bpw",
+          explanation: isDenseMoe
+            ? [
+                "N_text、N_lookup 和 N_exp 均以十亿参数（B）为单位，因此相关参数量需要乘 10^9 换算为实际参数个数。",
+                "第一项是每个 token 读取的非 lookup、非专家文本骨干权重。",
+                "第二项只计入当前 token 激活的专家权重，激活比例为 k / E。",
+                "最后一项只读取当前 token 对应的一行词嵌入（D 个值）和各层一行 PLE（L × P 个值），不读取整张 lookup 表。"
+              ]
+            : [
+                "N_text 和 N_lookup 以十亿参数（B）为单位，因此第一项需要乘 10^9 换算为实际参数个数。",
+                "第一项是每个 token 读取的非 lookup 文本骨干权重。",
+                "第二项只加回当前 token 对应的一行词嵌入（D 个值）和各层一行 PLE（L × P 个值），不读取整张 lookup 表。"
+              ],
+          evaluated: `${formatMb(decodeWeight.denseWeightBytes)} dense + ${formatMb(
+            decodeWeight.activeExpertWeightBytes
+          )} active experts + ${formatMb(decodeWeight.lookupBytesPerToken)} lookup = ${formatMb(
+            result.decodeWeightBytes
+          )}`
         },
         {
           label: "Total decode bytes per token",
@@ -1081,13 +1228,21 @@ function buildDenseFormulaTrace(
           )} = ${formatMb(result.decodeBytes)}`
         },
         {
-          label: isDenseMoe
-            ? "Decode compute FLOPs per token (Sliding+Full+MoE)"
-            : "Decode compute FLOPs per token (Dense MLP estimate)",
-          expression: isDenseMoe
-            ? "L_sliding · F_sliding + L_full · F_full"
-            : "6 · D · I",
-          evaluated: formatGflops(result.decodeComputeFlopsPerToken)
+          label: "Decode compute FLOPs per token",
+          expression: "F_decode = F_si + F_ss + F_fi + F_fs + F_PLE",
+          explanation: [
+            "该式按 Gemma 的实际层级结构汇总生成一个 token 所需的 Decode FLOPs。",
+            "F_si 和 F_fi 分别表示 Sliding Attention、Full Attention 独立 KV 层的总计算量，包含 Q/K/V 投影、Attention core、输出投影及 MLP 或 MoE。",
+            "F_ss 和 F_fs 分别表示 Sliding Attention、Full Attention 共享 KV 层的总计算量；这些层复用已有 K/V，不重复计算 K/V 投影，但仍计算 Q、Attention core、输出投影及 MLP。",
+            "F_PLE 表示当前 token 的 Per-Layer Embeddings 全局投影、逐层门控与逐层投影计算量。"
+          ],
+          evaluated: `${formatGflops(decodeFlops.slidingIndependent)} sliding-independent + ${formatGflops(
+            decodeFlops.slidingShared
+          )} sliding-shared + ${formatGflops(decodeFlops.fullIndependent)} full-independent + ${formatGflops(
+            decodeFlops.fullShared
+          )} full-shared + ${formatGflops(decodeFlops.ple)} PLE = ${formatGflops(
+            result.decodeComputeFlopsPerToken
+          )}`
         },
         {
           label: "Decode compute ceiling",
@@ -1347,6 +1502,7 @@ function buildIntermediateMetrics(
 
 function buildFormulaTrace(
   model: ModelDefinition,
+  platform: PlatformInput,
   workload: WorkloadInput,
   result: FullComputation
 ): FormulaTraceSection[] {
@@ -1354,7 +1510,7 @@ function buildFormulaTrace(
     model.formulaStrategyId === "dense-decoder-transformer" ||
     model.formulaStrategyId === "dense-decoder-moe"
   ) {
-    return buildDenseFormulaTrace(model, workload, result);
+    return buildDenseFormulaTrace(model, platform, workload, result);
   }
 
   if (
@@ -1363,6 +1519,8 @@ function buildFormulaTrace(
   ) {
     return buildHybridFormulaTrace(model, workload, result);
   }
+
+  const decodeFlops = deepSeekDecodeFlopsBreakdown(model, workload.prefillTokenLength);
 
   return [
     {
@@ -1534,9 +1692,89 @@ function buildFormulaTrace(
           )} = ${formatMb(result.decodeBytes)}`
         },
         {
+          label: "Decode Q projection FLOPs",
+          expression: "F_Q = 2 · (D · r_q + r_q · n_h · c)",
+          evaluated: `${formatGflops(decodeFlops.csa.q)} per layer × ${model.decoderLayers} = ${formatGflops(
+            decodeFlops.csa.q * model.decoderLayers
+          )}`
+        },
+        {
+          label: "Decode KV projection FLOPs",
+          expression: "F_KV = 2 · D · c",
+          evaluated: `${formatGflops(decodeFlops.csa.kvProj)} per layer × ${model.decoderLayers} = ${formatGflops(
+            decodeFlops.csa.kvProj * model.decoderLayers
+          )}`
+        },
+        {
+          label: "Decode Sliding attention core FLOPs",
+          expression: "F_core_sliding = 4 · L_kv_decode(sliding) · n_h · c",
+          evaluated: formatDecodeOperatorContribution(decodeFlops.sliding, model.slidingLayerCount, "core")
+        },
+        {
+          label: "Decode CSA attention core FLOPs",
+          expression: "F_core_csa = 4 · L_kv_decode(CSA) · n_h · c",
+          evaluated: formatDecodeOperatorContribution(decodeFlops.csa, model.csaLayerCount, "core")
+        },
+        {
+          label: "Decode HCA attention core FLOPs",
+          expression: "F_core_hca = 4 · L_kv_decode(HCA) · n_h · c",
+          evaluated: formatDecodeOperatorContribution(decodeFlops.hca, model.hcaLayerCount, "core")
+        },
+        {
+          label: "Decode CSA compressor FLOPs",
+          expression: "F_compressor_csa = 8 · D · c",
+          evaluated: formatDecodeOperatorContribution(decodeFlops.csa, model.csaLayerCount, "compressor")
+        },
+        {
+          label: "Decode HCA compressor FLOPs",
+          expression: "F_compressor_hca = 4 · D · c",
+          evaluated: formatDecodeOperatorContribution(decodeFlops.hca, model.hcaLayerCount, "compressor")
+        },
+        {
+          label: "Decode CSA indexer linear FLOPs",
+          expression: "F_indexer_lin = 8 · D · c_I + 2 · r_q · n_h_I · c_I + 2 · D · n_h_I",
+          evaluated: formatDecodeOperatorContribution(decodeFlops.csa, model.csaLayerCount, "indexerLin")
+        },
+        {
+          label: "Decode CSA indexer attention FLOPs",
+          expression: "F_indexer_attn = floor(S_ctx / m_csa) · n_h_I · c_I",
+          evaluated: formatDecodeOperatorContribution(decodeFlops.csa, model.csaLayerCount, "indexerAttn")
+        },
+        {
+          label: "Decode output projection FLOPs",
+          expression: "F_O = 2 · (n_h · c · r_o + o_groups · r_o · D)",
+          evaluated: `${formatGflops(decodeFlops.csa.output)} per layer × ${model.decoderLayers} = ${formatGflops(
+            decodeFlops.csa.output * model.decoderLayers
+          )}`
+        },
+        {
+          label: "Decode MoE FLOPs",
+          expression: "F_MoE = 6 · D · I · (k + 1)",
+          evaluated: `${formatGflops(decodeFlops.csa.moe)} per layer × ${model.decoderLayers} = ${formatGflops(
+            decodeFlops.csa.moe * model.decoderLayers
+          )}`
+        },
+        {
+          label: "Decode Sliding layers total FLOPs",
+          expression: "F_sliding_decode = N_sliding · (F_Q + F_KV + F_core_sliding + F_O + F_MoE)",
+          evaluated: formatGflops(decodeFlops.slidingTotal)
+        },
+        {
+          label: "Decode CSA layers total FLOPs",
+          expression: "F_csa_decode = N_csa · (F_Q + F_KV + F_core_csa + F_compressor_csa + F_indexer_lin + F_indexer_attn + F_O + F_MoE)",
+          evaluated: formatGflops(decodeFlops.csaTotal)
+        },
+        {
+          label: "Decode HCA layers total FLOPs",
+          expression: "F_hca_decode = N_hca · (F_Q + F_KV + F_core_hca + F_compressor_hca + F_O + F_MoE)",
+          evaluated: formatGflops(decodeFlops.hcaTotal)
+        },
+        {
           label: "Decode compute FLOPs per token",
-          expression: "L * D * I * (k + 1) / 3",
-          evaluated: formatGflops(result.decodeComputeFlopsPerToken)
+          expression: "F_decode = F_sliding_decode + F_csa_decode + F_hca_decode",
+          evaluated: `${formatGflops(decodeFlops.slidingTotal)} + ${formatGflops(
+            decodeFlops.csaTotal
+          )} + ${formatGflops(decodeFlops.hcaTotal)} = ${formatGflops(result.decodeComputeFlopsPerToken)}`
         },
         {
           label: "Decode compute ceiling",
@@ -2139,9 +2377,10 @@ export function calculatePerformanceResult(
     activeResult
   );
   const peakResult = decodeGeneration.peakResult;
-  const formulaTrace = buildFormulaTrace(model, workload, activeResult);
+  const formulaTrace = buildFormulaTrace(model, platform, workload, activeResult);
   const peakMemoryTrace = buildFormulaTrace(
     model,
+    platform,
     { ...workload, prefillTokenLength: decodeGeneration.finalContext },
     peakResult
   ).find((section) => section.category === "memory");

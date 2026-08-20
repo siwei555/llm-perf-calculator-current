@@ -30,6 +30,11 @@ export function FormulaTraceCard({
                   >
                     <strong>{row.label}</strong>
                     <code>{row.expression}</code>
+                    {row.explanation ? (
+                      <ul className="formula-trace__explanation">
+                        {row.explanation.map((item) => <li key={item}>{item}</li>)}
+                      </ul>
+                    ) : null}
                     <span>{row.evaluated}</span>
                   </Link>
                   {row.sourceUrl ? (

@@ -61,6 +61,8 @@ const traceVariableCatalog: Record<string, TraceVariableDefinition> = {
   bytes_per_elem: { symbol: "bytes_per_elem", meaning: "单个缓存元素的字节数。", source: "平台精度输入" },
   bpw: { symbol: "bpw", meaning: "普通权重每个参数占用的字节数。", source: "平台精度输入" },
   bpe: { symbol: "bpe", meaning: "专家权重每个参数占用的字节数。", source: "平台精度输入" },
+  N_text: { symbol: "N_text", meaning: "参与文本推理的骨干参数量，单位为十亿参数（B）；不等同于包含全部 checkpoint 组件的总参数量。", source: "模型注册数据：textBackboneParamsB" },
+  N_lookup: { symbol: "N_lookup", meaning: "整张 token lookup 参数表的参数量，单位为十亿参数（B），包括词嵌入表及 PLE lookup 表；该项先从文本骨干权重中扣除。", source: "模型注册数据：tokenLookupParamsB" },
   N_non: { symbol: "N_non", meaning: "非专家权重参数量。", source: "模型注册数据/权重文件" },
   N_exp: { symbol: "N_exp", meaning: "专家权重参数量。", source: "模型注册数据/权重文件" },
   N_sliding: { symbol: "N_sliding", meaning: "Sliding Attention 层数。", source: "模型 config.json" },
@@ -75,19 +77,34 @@ const traceVariableCatalog: Record<string, TraceVariableDefinition> = {
   F_Q: { symbol: "F_Q", meaning: "Query 路径的 FLOPs。", source: "公式派生" },
   F_KV: { symbol: "F_KV", meaning: "Key/Value 投影的 FLOPs。", source: "公式派生" },
   F_core: { symbol: "F_core", meaning: "Attention 核心计算的 FLOPs。", source: "公式派生" },
+  F_core_sliding: { symbol: "F_core_sliding", meaning: "单个 Sliding 层处理当前 token 时，QKᵀ 与 AV 两趟 Attention core 的 FLOPs。", source: "Sliding Decode 可见长度与 Attention 维度派生" },
+  F_core_csa: { symbol: "F_core_csa", meaning: "单个 CSA 层处理当前 token 时，QKᵀ 与 AV 两趟主 Attention core 的 FLOPs。", source: "CSA Decode 可见长度与 Attention 维度派生" },
+  F_core_hca: { symbol: "F_core_hca", meaning: "单个 HCA 层处理当前 token 时，QKᵀ 与 AV 两趟 Attention core 的 FLOPs。", source: "HCA Decode 可见长度与 Attention 维度派生" },
   F_O: { symbol: "F_O", meaning: "Attention 输出投影的 FLOPs。", source: "公式派生" },
   F_MLP: { symbol: "F_MLP", meaning: "Dense MLP 的 FLOPs。", source: "公式派生" },
   F_PLE: { symbol: "F_PLE", meaning: "Per-Layer Embeddings 全局投影及所有逐层门控/投影的 FLOPs。", source: "PLE 公式派生" },
+  F_decode: { symbol: "F_decode", meaning: "生成一个 token 时，当前 Gemma decoder 执行的总浮点运算量。", source: "由各类 decoder 层 FLOPs 与 PLE FLOPs 汇总" },
+  F_si: { symbol: "F_si", meaning: "所有 Sliding Attention 独立 KV 层在单步 Decode 中的 FLOPs，包含 Q/K/V、Attention core、输出投影及 MLP/MoE。", source: "由模型层 schedule 与 Decode 公式派生" },
+  F_ss: { symbol: "F_ss", meaning: "所有 Sliding Attention 共享 KV 层在单步 Decode 中的 FLOPs；这些层复用 KV，因此不重复计算 K/V 投影。", source: "由模型层 schedule 与 Decode 公式派生" },
+  F_fi: { symbol: "F_fi", meaning: "所有 Full Attention 独立 KV 层在单步 Decode 中的 FLOPs，包含 Q/K/V、Attention core、输出投影及 MLP/MoE。", source: "由模型层 schedule 与 Decode 公式派生" },
+  F_fs: { symbol: "F_fs", meaning: "所有 Full Attention 共享 KV 层在单步 Decode 中的 FLOPs；这些层复用 KV，因此不重复计算 K/V 投影。", source: "由模型层 schedule 与 Decode 公式派生" },
   F_MoE: { symbol: "F_MoE", meaning: "MoE 前馈路径的 FLOPs。", source: "公式派生" },
   F_FFN: { symbol: "F_FFN", meaning: "Dense FFN 路径的 FLOPs。", source: "公式派生" },
   F_compressor: { symbol: "F_compressor", meaning: "Token compressor 的 FLOPs。", source: "公式派生" },
   F_indexer: { symbol: "F_indexer", meaning: "CSA indexer 的 FLOPs。", source: "公式派生" },
+  F_compressor_csa: { symbol: "F_compressor_csa", meaning: "单个 CSA 层对当前 token 执行 compressor 路径的 FLOPs。", source: "CSA compressor 公式派生" },
+  F_compressor_hca: { symbol: "F_compressor_hca", meaning: "单个 HCA 层对当前 token 执行 compressor 路径的 FLOPs。", source: "HCA compressor 公式派生" },
+  F_indexer_lin: { symbol: "F_indexer_lin", meaning: "单个 CSA 层为当前 token 生成索引 Query 与相关线性投影的 FLOPs。", source: "CSA indexer 线性投影公式派生" },
+  F_indexer_attn: { symbol: "F_indexer_attn", meaning: "单个 CSA 层的当前 token 扫描压缩历史块所需的 Indexer attention FLOPs。", source: "CSA 压缩历史长度与 indexer 维度派生" },
   F_inproj: { symbol: "F_inproj", meaning: "Linear Attention 输入投影的 FLOPs。", source: "公式派生" },
   F_conv: { symbol: "F_conv", meaning: "Linear Attention Conv1D 的 FLOPs。", source: "公式派生" },
   F_scan: { symbol: "F_scan", meaning: "Linear Attention recurrent scan 的 FLOPs。", source: "公式派生" },
   F_sliding: { symbol: "F_sliding", meaning: "单个 Sliding 层的总 FLOPs。", source: "公式派生" },
   F_csa: { symbol: "F_csa", meaning: "单个 CSA 层的总 FLOPs。", source: "公式派生" },
   F_hca: { symbol: "F_hca", meaning: "单个 HCA 层的总 FLOPs。", source: "公式派生" },
+  F_sliding_decode: { symbol: "F_sliding_decode", meaning: "全部 Sliding 层生成一个 token 的 FLOPs 总和。", source: "Sliding 层逐算子结果乘层数后汇总" },
+  F_csa_decode: { symbol: "F_csa_decode", meaning: "全部 CSA 层生成一个 token 的 FLOPs 总和。", source: "CSA 层逐算子结果乘层数后汇总" },
+  F_hca_decode: { symbol: "F_hca_decode", meaning: "全部 HCA 层生成一个 token 的 FLOPs 总和。", source: "HCA 层逐算子结果乘层数后汇总" },
   F_full: { symbol: "F_full", meaning: "单个 Full Attention 层的总 FLOPs。", source: "公式派生" },
   F_linear: { symbol: "F_linear", meaning: "单个 Linear Attention 层的总 FLOPs。", source: "公式派生" },
   F_tmp: { symbol: "F_tmp", meaning: "当前步骤的临时计算量。", source: "公式派生" },
@@ -464,6 +481,11 @@ function FormulaTracePreview({ trace }: { trace: FormulaTraceSection }) {
             >
               <span className="trace-preview__label">{row.label}</span>
               <code>{row.expression}</code>
+              {row.explanation ? (
+                <ul className="trace-preview__explanation">
+                  {row.explanation.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              ) : null}
               {row.sourceUrl ? (
                 <a
                   className="trace-preview__source"

@@ -56,6 +56,8 @@ export type IntermediateMetric = {
 export type FormulaTraceRow = {
   label: string;
   expression: string;
+  /** 对公式口径的自然语言说明；与纯数学表达式分开渲染。 */
+  explanation?: string[];
   evaluated: string;
   sourceLabel?: string;
   sourceUrl?: string;
