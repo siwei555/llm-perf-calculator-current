@@ -2,7 +2,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { FormulaStrategyId, ModelDefinition, ModelId } from "../../domain/model/types";
 import type { FormulaTraceSection } from "../../domain/performance/types";
-import { getFormulaTraceRowTarget } from "../../features/performance-calculator/utils/formulaTraceTargets";
+import {
+  getFormulaTraceRowTarget,
+  groupFormulaTraceSections
+} from "../../features/performance-calculator/utils/formulaTraceTargets";
 import { useCalculatorContext } from "../../features/performance-calculator/state/CalculatorProvider";
 
 type PrefillFormulaGuide = {
@@ -552,6 +555,7 @@ export function FormulaNotesPage() {
   const [searchParams] = useSearchParams();
   const [openSections, setOpenSections] = useState<Set<string>>(() => new Set());
   const pageRef = useRef<HTMLElement>(null);
+  const handledScrollTargetRef = useRef<string | null>(null);
   const {
     availableFamilies,
     calculationRevision,
@@ -597,6 +601,11 @@ export function FormulaNotesPage() {
     }
 
     const targetId = targetFormula ?? targetSection;
+    const scrollTargetKey = `${targetSection}:${targetId}`;
+    if (handledScrollTargetRef.current === scrollTargetKey) {
+      return;
+    }
+    handledScrollTargetRef.current = scrollTargetKey;
     const frame = window.requestAnimationFrame(() => {
       document.getElementById(targetId)?.scrollIntoView({
         behavior: "smooth",
@@ -623,9 +632,10 @@ export function FormulaNotesPage() {
     return null;
   }
 
-  const prefillTrace = result.formulaTrace.find((trace) => trace.category === "prefill");
-  const decodeTrace = result.formulaTrace.find((trace) => trace.category === "decode");
-  const memoryTrace = result.formulaTrace.find((trace) => trace.category === "memory");
+  const groupedFormulaTrace = groupFormulaTraceSections(result.formulaTrace);
+  const prefillTrace = groupedFormulaTrace.find((trace) => trace.category === "prefill");
+  const decodeTrace = groupedFormulaTrace.find((trace) => trace.category === "decode");
+  const memoryTrace = groupedFormulaTrace.find((trace) => trace.category === "memory");
   const prefillFormulaGuide = getPrefillFormulaGuide(model);
 
   return (

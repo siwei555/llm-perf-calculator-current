@@ -2,7 +2,8 @@ import type { FormulaTraceSection } from "../../../domain/performance/types";
 import { Link } from "react-router-dom";
 import {
   formulaSectionTargets,
-  getFormulaTraceRowTarget
+  getFormulaTraceRowTarget,
+  groupFormulaTraceSections
 } from "../utils/formulaTraceTargets";
 
 export function FormulaTraceCard({
@@ -10,11 +11,13 @@ export function FormulaTraceCard({
 }: {
   sections: FormulaTraceSection[];
 }) {
+  const groupedSections = groupFormulaTraceSections(sections);
+
   return (
     <article className="panel">
       <h3>公式追溯</h3>
       <div className="formula-trace">
-        {sections.map((section) => (
+        {groupedSections.map((section) => (
           <details key={section.category} className="formula-trace__section">
             <summary className="formula-trace__summary">
               <span className="eyebrow">{section.category}</span>
@@ -22,7 +25,7 @@ export function FormulaTraceCard({
             </summary>
             <div className="formula-trace__grid">
               {section.rows.map((row, rowIndex) => (
-                <div key={row.label} className="formula-trace__row">
+                <div key={`${row.label}-${rowIndex}`} className="formula-trace__row">
                   <Link
                     className="formula-trace__jump"
                     to={`/formula-notes?section=${formulaSectionTargets[section.category]}&formula=${getFormulaTraceRowTarget(section.category, rowIndex)}`}
