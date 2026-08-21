@@ -23,9 +23,10 @@ const navItems: SidebarItem[] = [
       { id: "performance-input-length", label: "输入长度" },
       { id: "performance-platform", label: "平台参数" },
       { id: "performance-assumptions", label: "计算假设" },
+      { id: "performance-comparison-settings", label: "对比设置" },
       { id: "performance-overview", label: "核心结果" },
       { id: "performance-comparison", label: "性能对比" },
-      { id: "performance-trend", label: "Token 趋势" },
+      { id: "performance-dashboard", label: "性能对比图" },
       { id: "performance-formula-trace", label: "公式追溯" },
       { id: "performance-intermediate", label: "中间量结果表" }
     ]

@@ -5,7 +5,7 @@ import { getResourceScaling } from "../services/platformScaling";
 type ScaleMode = "linear" | "log";
 type MemoryMode = "total" | "weights" | "cache" | "temp" | "overhead";
 type MemoryScope = "aggregate" | "per-chip";
-type Metric = "prefillTps" | "decodeTps";
+type Metric = "prefillTps" | "decodeTps" | "ttftMs";
 
 const WIDTH = 720;
 const HEIGHT = 330;
@@ -22,6 +22,17 @@ function domain(values: number[]) {
   const max = Math.max(...finiteValues);
   if (!Number.isFinite(max) || max <= 0) return [0, 1] as const;
   return [0, max * 1.08] as const;
+}
+
+function metricName(metric: Metric) {
+  if (metric === "prefillTps") return "Prefill TPS";
+  if (metric === "decodeTps") return "Initial Decode TPS";
+  return "TTFT";
+}
+
+function metricUnit(metric: Metric) {
+  if (metric === "prefillTps" || metric === "decodeTps") return "tokens/s";
+  return "ms";
 }
 
 function MultiLineChart({ results, metric, scaleMode }: { results: ComparisonResult[]; metric: Metric; scaleMode: ScaleMode }) {
@@ -59,7 +70,14 @@ function MultiLineChart({ results, metric, scaleMode }: { results: ComparisonRes
           const { profile } = result;
           const visibleSeries = seriesFor(result).filter((point) => Number.isFinite(point[metric]));
           const path = visibleSeries.map((point, index) => `${index === 0 ? "M" : "L"}${x(point.tokenLength)},${y(point[metric])}`).join(" ");
-          return <g key={profile.id}><path d={path} fill="none" stroke={profile.color} strokeWidth="2.5" />{visibleSeries.map((point) => <circle key={point.tokenLength} cx={x(point.tokenLength)} cy={y(point[metric])} r="3" fill={profile.color}><title>{`${profile.label}\nContext: ${point.tokenLength.toLocaleString()}\n${metric === "prefillTps" ? "Prefill" : "Initial Decode"} TPS: ${point[metric].toFixed(2)}\n${metric === "prefillTps" ? `Prefill compute scaling: ${getResourceScaling(profile.platform, "prefill", "compute").toFixed(2)}x\nPrefill bandwidth scaling: ${getResourceScaling(profile.platform, "prefill", "bandwidth").toFixed(2)}x` : `Decode compute scaling: ${getResourceScaling(profile.platform, "decode", "compute").toFixed(2)}x\nDecode bandwidth scaling: ${getResourceScaling(profile.platform, "decode", "bandwidth").toFixed(2)}x`}\nBottleneck: ${metric === "prefillTps" ? point.prefillBottleneck : point.decodeBottleneck}`}</title></circle>)}</g>;
+          return <g key={profile.id}><path d={path} fill="none" stroke={profile.color} strokeWidth="2.5" />{visibleSeries.map((point) => {
+            const phaseDetails = metric === "prefillTps"
+              ? `\nPrefill compute scaling: ${getResourceScaling(profile.platform, "prefill", "compute").toFixed(2)}x\nPrefill bandwidth scaling: ${getResourceScaling(profile.platform, "prefill", "bandwidth").toFixed(2)}x\nBottleneck: ${point.prefillBottleneck}`
+              : metric === "decodeTps"
+                ? `\nDecode compute scaling: ${getResourceScaling(profile.platform, "decode", "compute").toFixed(2)}x\nDecode bandwidth scaling: ${getResourceScaling(profile.platform, "decode", "bandwidth").toFixed(2)}x\nBottleneck: ${point.decodeBottleneck}`
+                : "";
+            return <circle key={point.tokenLength} cx={x(point.tokenLength)} cy={y(point[metric])} r="3" fill={profile.color}><title>{`${profile.label}\nContext: ${point.tokenLength.toLocaleString()}\n${metricName(metric)}: ${point[metric].toFixed(2)} ${metricUnit(metric)}${phaseDetails}`}</title></circle>;
+          })}</g>;
         })}
         <line x1={PAD.left} x2={PAD.left} y1={PAD.top} y2={HEIGHT - PAD.bottom} className="dashboard-axis" />
         <line x1={PAD.left} x2={WIDTH - PAD.right} y1={HEIGHT - PAD.bottom} y2={HEIGHT - PAD.bottom} className="dashboard-axis" />
@@ -153,12 +171,15 @@ export function PerformanceDashboardCharts({ results }: { results: ComparisonRes
   const [scaleMode, setScaleMode] = useState<ScaleMode>("linear");
   const [memoryMode, setMemoryMode] = useState<MemoryMode>("total");
   const [memoryScope, setMemoryScope] = useState<MemoryScope>("aggregate");
+  const [showTps, setShowTps] = useState(true);
+  const [showTtft, setShowTtft] = useState(true);
+  const showTrendLegend = showTps || showTtft;
   return <section className="dashboard-section">
-    <div className="dashboard-heading"><div><h3>性能数据看板</h3><p>所有曲线共享当前 Token Sweep，Decode 曲线表示 initial decode TPS。</p></div><label>X 轴<select value={scaleMode} onChange={(event) => setScaleMode(event.target.value as ScaleMode)}><option value="linear">线性</option><option value="log">对数</option></select></label></div>
+    <div className="dashboard-heading"><div><h3>性能数据看板</h3><p>按需展示 Token 趋势；所有曲线共享当前 Token Sweep，Decode 表示 initial decode TPS。</p></div><div className="dashboard-controls"><div className="dashboard-metric-toggles"><label><input type="checkbox" checked={showTps} onChange={(event) => setShowTps(event.target.checked)} />Prefill &amp; Decode TPS</label><label><input type="checkbox" checked={showTtft} onChange={(event) => setShowTtft(event.target.checked)} />TTFT</label></div><label>X 轴<select value={scaleMode} onChange={(event) => setScaleMode(event.target.value as ScaleMode)}><option value="linear">线性</option><option value="log">对数</option></select></label></div></div>
     <div className="dashboard-grid">
-      <article className="panel dashboard-chart"><div className="dashboard-chart__title"><h4><i className="dashboard-title-dot dashboard-title-dot--prefill" />Prefill Speed</h4><span>单位 tps</span></div><MultiLineChart results={results} metric="prefillTps" scaleMode={scaleMode} /></article>
-      <article className="panel dashboard-chart"><div className="dashboard-chart__title"><h4><i className="dashboard-title-dot dashboard-title-dot--decode" />Decode Speed</h4><span>单位 tps</span></div><MultiLineChart results={results} metric="decodeTps" scaleMode={scaleMode} /></article>
-      <div className="dashboard-shared-legend"><ProfileLegend results={results} /></div>
+      {showTps ? <><article className="panel dashboard-chart"><div className="dashboard-chart__title"><h4><i className="dashboard-title-dot dashboard-title-dot--prefill" />Prefill Speed</h4><span>单位 tps</span></div><MultiLineChart results={results} metric="prefillTps" scaleMode={scaleMode} /></article><article className="panel dashboard-chart"><div className="dashboard-chart__title"><h4><i className="dashboard-title-dot dashboard-title-dot--decode" />Decode Speed</h4><span>单位 tps</span></div><MultiLineChart results={results} metric="decodeTps" scaleMode={scaleMode} /></article></> : null}
+      {showTtft ? <article className="panel dashboard-chart dashboard-chart--full"><div className="dashboard-chart__title"><h4><i className="dashboard-title-dot dashboard-title-dot--ttft" />TTFT</h4><span>单位 ms</span></div><MultiLineChart results={results} metric="ttftMs" scaleMode={scaleMode} /></article> : null}
+      {showTrendLegend ? <div className="dashboard-shared-legend"><ProfileLegend results={results} /></div> : null}
       <article className="panel dashboard-chart dashboard-chart--memory"><div className="dashboard-chart__title"><h4><i className="dashboard-title-dot dashboard-title-dot--memory" />Memory Usage（{memoryScope === "per-chip" ? "单卡显存压力" : "总显存需求"}）</h4><div><span>单位 MB</span><select aria-label="显存口径" value={memoryScope} onChange={(event) => setMemoryScope(event.target.value as MemoryScope)}><option value="aggregate">总显存需求</option><option value="per-chip">单卡显存压力</option></select><select aria-label="显存组成项" value={memoryMode} onChange={(event) => setMemoryMode(event.target.value as MemoryMode)}><option value="total">全部</option><option value="weights">只看 Weight</option><option value="cache">只看 KV/State Cache</option><option value="temp">只看 Temp</option><option value="overhead">只看 Runtime Overhead</option></select></div></div><MemoryUsageChart results={results} mode={memoryMode} scope={memoryScope} scaleMode={scaleMode} /></article>
     </div>
   </section>;

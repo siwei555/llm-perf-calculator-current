@@ -571,8 +571,10 @@ export function useCalculatorState() {
         resolveDecodeOutputTokens(state.workload)
       ));
       setComparisonError(null);
+      return true;
     } catch (error) {
       setComparisonError(error instanceof Error ? error.message : "对比计算失败");
+      return false;
     }
   }
 

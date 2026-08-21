@@ -182,7 +182,7 @@ export function CalculatorControls({
               <FieldError message={validationErrors.decodeOutputTokens} />
             </label>
           </div>
-          <h4 className="input-section-title">Token趋势图扫描</h4>
+          <h4 className="input-section-title">性能对比图扫描</h4>
           <div className="form-grid">
             <label className="field">
               <span>Token Sweep Start</span>

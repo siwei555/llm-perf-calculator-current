@@ -9,7 +9,7 @@ type Props = {
   onDelete: (profileId: string) => void;
   onToggle: (profileId: string) => void;
   onUpdate: (profileId: string, field: "batchSize" | "chipCount" | "precision", value: number | "w4a8" | "w8a8" | "fp8" | "bf16" | "custom") => void;
-  onCalculate: () => void;
+  onCalculate: () => boolean;
   error?: string | null;
 };
 
@@ -23,8 +23,18 @@ export function ComparisonProfilesPanel({
   onCalculate,
   error
 }: Props) {
+  const calculateAndShowCharts = () => {
+    if (!onCalculate()) return;
+    window.requestAnimationFrame(() => {
+      document.getElementById("performance-dashboard")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+    });
+  };
+
   return (
-    <article className="panel comparison-profiles">
+    <article id="performance-comparison-settings" className="panel comparison-profiles page-section-anchor">
       <div className="comparison-profiles__header">
         <div>
           <h3>对比配置</h3>
@@ -34,7 +44,7 @@ export function ComparisonProfilesPanel({
           <button type="button" className="secondary-button" onClick={onAdd} disabled={profiles.length >= 4}>
             添加当前配置
           </button>
-          <button type="button" className="primary-button" onClick={onCalculate} disabled={!profiles.some((profile) => profile.enabled)}>
+          <button type="button" className="primary-button" onClick={calculateAndShowCharts} disabled={!profiles.some((profile) => profile.enabled)}>
             开始对比
           </button>
         </div>

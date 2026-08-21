@@ -5,7 +5,6 @@ import { FormulaTraceCard } from "../../features/performance-calculator/componen
 import { IntermediateMetricsTable } from "../../features/performance-calculator/components/IntermediateMetricsTable";
 import { MemoryBreakdownCard } from "../../features/performance-calculator/components/MemoryBreakdownCard";
 import { MetricCards } from "../../features/performance-calculator/components/MetricCards";
-import { TrendChart } from "../../features/performance-calculator/components/TrendChart";
 import { ComparisonProfilesPanel } from "../../features/performance-calculator/components/ComparisonProfilesPanel";
 import { PerformanceDashboardCharts } from "../../features/performance-calculator/components/PerformanceDashboardCharts";
 import { ComparisonDetailTable } from "../../features/performance-calculator/components/ComparisonDetailTable";
@@ -293,20 +292,6 @@ export function PerformanceCalculatorPage() {
                 </div>
               </div>
             </article>
-        </div>
-
-        <div id="performance-trend" className="page-section-anchor">
-          <TrendChart
-            points={result.tokenSweepSeries}
-          selectedMetric={state.view.selectedTrendMetric}
-          onMetricChange={(value) => updateView("selectedTrendMetric", value)}
-          showDataPoints={state.view.showTrendDataPoints}
-          onShowDataPointsChange={(value) => updateView("showTrendDataPoints", value)}
-          showBottleneckBackground={state.view.showBottleneckBackground}
-          onShowBottleneckBackgroundChange={(value) =>
-            updateView("showBottleneckBackground", value)
-          }
-          />
         </div>
 
         <div id="performance-dashboard" className="page-section-anchor">

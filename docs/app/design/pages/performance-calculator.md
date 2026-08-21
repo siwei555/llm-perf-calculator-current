@@ -8,6 +8,10 @@
 - Memory Usage 与 Prefill/Decode 共用 X 轴类型：线性模式消费固定步长显存序列，对数模式消费按 `Log Scale Multiplier` 独立计算的倍增序列，柱形、刻度标签和 Tooltip 必须同步切换。
 - Precision preset buttons only write the existing bytes fields and do not imply kernel-efficiency equivalence.
 - Users can save, copy, delete, enable and disable up to four independent comparison profiles. Saved profiles expose Batch, N Chip and Precision edits and do not follow later changes to current inputs.
+- 左侧“性能计算”导航组包含“对比设置”子标题并定位到 profile 配置区；“开始对比”成功后平滑滚动到 `performance-dashboard` 性能对比图，计算失败时停留在设置区展示错误。
+- “对比明细”使用默认收起的可折叠卡片；标题作为展开/收起入口，展开后保留完整明细表与横向滚动。
+- Runtime Overhead 编辑框、趋势指标选择、X 轴类型及显存筛选控件统一使用浅灰细边框、柔和圆角和低强度聚焦环，避免浏览器默认黑色粗边框破坏工具界面层次。
+- 性能数据看板标题区提供 `Prefill & Decode TPS`、`TTFT` 两个复选框，分别控制对应 Token 趋势图是否渲染；两项默认勾选。Prefill/Decode 两图并排，TTFT 独占全宽；趋势图共享线性/对数 X 轴与 profile 图例，现有 Memory Usage 组成柱状图始终保留。不单独提供 Total Runtime Memory 趋势图，避免与 Memory Usage 的总显存口径重复。
 - “开始对比” independently evaluates each enabled profile over the shared Token Sweep. A context-limit failure identifies the offending profile.
 - Prefill Speed and Decode Speed are side-by-side multi-series charts on wide screens. Memory Usage spans the row and supports total, weight-only and cache-only modes. All three charts stack vertically on narrow screens.
 - The two speed charts share one profile legend. Memory `全部` mode uses grouped stacked bars: each profile owns one bar per sweep point, with Weight, persistent KV/State, temporary workspace and runtime overhead rendered as same-color opacity layers. The memory axis and tooltip use MB.
@@ -107,7 +111,6 @@
 - `Total Runtime Memory`
 - `Bottleneck Classification`
 - `Formula Trace`
-- `Token Sweep Trend`
 
 页面面向内部研发和性能分析人员，优先保证高密度、可追溯和工程可解释性。
 
@@ -119,7 +122,7 @@
 - 平台参数输入
 - token 输入与范围输入
 - 单点性能计算
-- token 趋势图计算与展示
+- Token Sweep 数据计算与性能对比图展示
 - 显存估算摘要展示
 - 结构摘要跳转
 - 公式说明跳转
@@ -349,11 +352,11 @@ type TokenSweepSeriesPoint = {
 1. 第一行：六张指标卡采用两行三列；第一行依次为 `TTFT`、`Prefill TPS`、`Peak Runtime Memory`，第二行集中展示 `Initial Decode TPS`、`Average Decode TPS`、`Decode Time`。内存拆解与指标区并排时保持至少 320px
 2. 第二行：`Prefill / Decode 对比` 独占全宽
 3. 第三行：结构摘要与当前上下文摘要并排，宽度比例约为 58:42，为结构摘要中的长标签和数值预留足够空间。结构摘要沿用紧凑键值格式，显示 Decoder Layers、Hidden Size、Attention Heads、KV Heads、Experts、Active Experts / Token、MoE Intermediate Size 和 Context Limit，数值直接取自当前模型定义
-4. 第四行：Token 趋势图独占全宽
+4. 第四行：性能对比图独占全宽
 5. 第五行：公式追溯独占全宽
 6. 第六行：中间量结果表独占全宽
 
-`公式追溯` 必须位于 `Token 趋势图` 正下方，并按 `Prefill`、`Decode`、`Memory` 小标题形成三行独立折叠区。三个折叠区首次进入均为收起状态，可分别展开；展开后该阶段的公式项按一行三列排列并顶部对齐。
+`公式追溯` 必须位于性能对比图下方，并按 `Prefill`、`Decode`、`Memory` 小标题形成三行独立折叠区。三个折叠区首次进入均为收起状态，可分别展开；展开后该阶段的公式项按一行三列排列并顶部对齐。
 
 每张追溯小公式卡片必须链接到公式说明页中与其对应的小公式位置。跳转时自动展开所属的 Prefill、Decode 或 Memory 折叠板块，并将对应小公式滚动到可视区域；不能只定位到阶段大板块。
 
@@ -504,68 +507,6 @@ Prefill/Decode 对比表宽度不足时允许容器内部横向滚动，禁止�
 - 单位明确
 - 对差异大的行做视觉强调
 
-### Section C: Token 趋势图区
-
-这是页面的一等区域，默认展开。
-
-#### 顶部控制
-
-字段：
-
-- `Metric`
-  - `Prefill TPS`
-  - `Decode TPS`
-  - `TTFT`
-  - `Total Runtime Memory`
-- `Sweep Mode`
-  - 首版固定 `Fixed Step`
-- `Show Bottleneck Background`
-- `Show Data Points`
-
-#### 图表契约
-
-X 轴：
-
-- `Token Length`
-
-Y 轴：
-
-- 由 `selectedTrendMetric` 决定
-
-展示规则：
-
-- 若 `selectedTrendMetric` 为 `prefillTps`：
-  - 主曲线显示 `prefillTps`
-  - 次曲线可同时显示 `decodeTps`
-- 若 `selectedTrendMetric` 为 `decodeTps`：
-  - 主曲线显示 `decodeTps`
-  - 次曲线可同时显示 `prefillTps`
-- 若 `selectedTrendMetric` 为 `ttft` 或 `totalRuntimeMemory`：
-  - 单曲线模式
-
-Tooltip 必须显示：
-
-- `Token Length`
-- 当前曲线值
-- `Prefill Bottleneck`
-- `Decode Bottleneck`
-- 至少一个中间量摘要
-
-数据生成规则：
-
-- 使用 `[tokenRangeStart, tokenRangeEnd]` 按 `tokenRangeStep` 生成离散点
-- 每个点都调用同一套计算逻辑重新求值
-- 禁止仅通过 UI 插值生成伪数据点
-
-趋势图下方必须展示相同离散点的表格，至少包含 Token Length、Prefill TPS、Decode TPS、TTFT、Runtime Memory 和两阶段 Bottleneck。
-
-每张趋势图的纵轴必须根据该指标当前采样点的实际最小值和最大值独立缩放并保留少量上下边距；不得强制最小跨度为 1。纵轴刻度的小数位根据当前数值跨度自动调整，避免 Decode TPS 等小范围数据的多个刻度被舍入成相同整数。
-
-边界规则：
-
-- 若点数超过 `500`，前端应提示范围过密，并阻止直接计算
-- 若点数低于 `2`，不生成趋势图，显示校验提示
-
 ### Section D: 瓶颈拆解区
 
 组件：
@@ -634,7 +575,7 @@ Tooltip 必须显示：
 
 模型摘要中的 `Context` 来自模型配置声明的最大上下文窗口（`max_position_embeddings` 或 `text_config.max_position_embeddings`），不得使用性能验收场景长度代替。`Prompt Token Length` 默认值 `131072`（128K）是验收计算长度，输入项下方应明确注明它不是模型最大上下文窗口。
 
-输入长度快捷值必须受当前模型 `contextLimit` 约束：超过最大上下文的快捷按钮禁用，状态更新函数同时拒绝越界值；手动输入的 Prompt 长度和趋势扫描起点、终点也必须进行相同校验。`Token Sweep Start`、`Token Sweep End`、`Linear Chart Step`、`Log Scale Multiplier` 四项归入独立的“Token趋势图扫描”小节。线性步长与对数刻度倍率分别控制两种横轴展示，不能共用同一个步长含义。
+输入长度快捷值必须受当前模型 `contextLimit` 约束：超过最大上下文的快捷按钮禁用，状态更新函数同时拒绝越界值；手动输入的 Prompt 长度和趋势扫描起点、终点也必须进行相同校验。`Token Sweep Start`、`Token Sweep End`、`Linear Chart Step`、`Log Scale Multiplier` 四项归入独立的“性能对比图扫描”小节。线性步长与对数刻度倍率分别控制两种横轴展示，不能共用同一个步长含义。
 
 快捷输入区位于输入长度板块最下方，标题为“快捷输入”。用户先聚焦 `Prompt Token Length`、`Decode Output Tokens` 或任一 Token Sweep 输入框，再点击 `4K / 8K / 32K / 128K / 1M`，快捷值写入当前聚焦的目标字段；界面同时显示当前输入目标。
 
@@ -785,7 +726,6 @@ Tab：
 - `CalculationToolbar`
 - `SummaryMetricCards`
 - `PrefillDecodeComparisonTable`
-- `TokenTrendChartPanel`
 - `BottleneckBreakdownPanel`
 - `IntermediateMetricsTable`
 - `StructureSummaryCard`
@@ -827,8 +767,8 @@ Tab：
 ## 10. 验收标准
 
 - 页面可在不切页的情况下完成一次完整计算
-- 单点结果和 token 趋势图使用同一套输入上下文
-- token 范围可配置，且趋势图不是静态占位
+- 单点结果和性能对比图使用同一套输入上下文
+- token 范围可配置，且性能对比图不是静态占位
 - 显存分析中必须包含 `weights`
 - 趋势图 tooltip 能看到 token 值、指标值和瓶颈分类
 - 结构摘要和公式追踪都能跳转到对应页面
