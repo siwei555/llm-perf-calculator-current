@@ -74,8 +74,21 @@ export type TokenSweepPoint = {
   decodeTps: number;
   ttftMs: number;
   totalRuntimeMemoryGb: number;
+  weightsGb: number;
+  persistentCacheGb: number;
+  temporaryMemoryGb: number;
+  runtimeOverheadGb: number;
   prefillBottleneck: BottleneckType;
   decodeBottleneck: BottleneckType;
+};
+
+export type MemorySweepPoint = {
+  tokenLength: number;
+  weightsGb: number;
+  persistentCacheGb: number;
+  temporaryMemoryGb: number;
+  runtimeOverheadGb: number;
+  totalGb: number;
 };
 
 export type PerformanceProjectionPoint = {
@@ -99,5 +112,6 @@ export type PerformanceResult = {
   intermediateMetrics: IntermediateMetric[];
   formulaTrace: FormulaTraceSection[];
   tokenSweepSeries: TokenSweepPoint[];
+  logarithmicTokenSweepSeries: TokenSweepPoint[];
   projectionSeries: PerformanceProjectionPoint[];
 };

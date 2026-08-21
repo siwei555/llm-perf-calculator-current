@@ -1,6 +1,7 @@
 import type { ModelDefinition } from "../../../domain/model/types";
 import type { PerformanceResult } from "../../../domain/performance/types";
 import type { CalculationSnapshot } from "../state/useCalculatorState";
+import { getParallelEfficiency, getResourceScaling } from "./platformScaling";
 
 export type PerformanceHtmlReportInput = {
   model: ModelDefinition;
@@ -645,6 +646,10 @@ export function buildPerformanceHtmlReport(input: PerformanceHtmlReportInput) {
     <div><span>Model</span><strong>${escapeHtml(model.displayName)}</strong></div>
     <div><span>Prompt Length</span><strong>${formatNumber(snapshot.workload.prefillTokenLength, 0)} tokens</strong></div>
     <div><span>Prefill TPS / TTFT</span><strong>${formatNumber(result.summary.prefillTps)} tokens/s · ${formatNumber(result.summary.ttftMs)} ms</strong></div>
+    <div><span>Platform / Chip</span><strong>${formatNumber(snapshot.platform.computeThroughputTflops)} TFLOPS · ${formatNumber(snapshot.platform.memoryBandwidthGbps)} GB/s · NChip ${snapshot.platform.chipCount}</strong></div>
+    <div><span>Prefill Parallel Efficiency</span><strong>Compute ${(getParallelEfficiency(snapshot.platform, "prefill", "compute") * 100).toFixed(0)}% · Bandwidth ${(getParallelEfficiency(snapshot.platform, "prefill", "bandwidth") * 100).toFixed(0)}% · actual ${getResourceScaling(snapshot.platform, "prefill", "compute").toFixed(2)}× / ${getResourceScaling(snapshot.platform, "prefill", "bandwidth").toFixed(2)}×</strong></div>
+    <div><span>Decode Parallel Efficiency</span><strong>Compute ${(getParallelEfficiency(snapshot.platform, "decode", "compute") * 100).toFixed(0)}% · Bandwidth ${(getParallelEfficiency(snapshot.platform, "decode", "bandwidth") * 100).toFixed(0)}% · actual ${getResourceScaling(snapshot.platform, "decode", "compute").toFixed(2)}× / ${getResourceScaling(snapshot.platform, "decode", "bandwidth").toFixed(2)}×</strong></div>
+    <div><span>Memory Scope</span><strong>总显存需求；总容量 ${formatNumber(snapshot.platform.memoryCapacityGb * snapshot.platform.chipCount)} GB</strong></div>
     <div><span>Exported At</span><strong>${escapeHtml(exportedAt.toLocaleString("zh-CN"))}</strong></div>
   </section>
   <p class="report-note">颜色分块表示该模型的主要运算模块；表内数值基于最近一次成功计算的模型与 Prompt 快照。Projection 行为单层、单 token 理论 FLOPs，块汇总按实际层数累加；这不是实测性能数据。</p>

@@ -14,6 +14,13 @@ import {
   getModelsByFamily
 } from "../../../engines/model-registry";
 import { calculatePerformanceResult } from "../services/performanceCalculator";
+import { calculateComparisonResults } from "../services/comparisonCalculator";
+import { defaultParallelEfficiencies } from "../services/platformScaling";
+import type {
+  ComparisonProfile,
+  ComparisonResult,
+  PrecisionPresetId
+} from "../types/comparison";
 import {
   clearStoredHistoryRecords,
   loadHistoryRecords,
@@ -31,6 +38,7 @@ export type CalculatorViewState = {
 export type CalculatorState = {
   modelId: ModelId;
   platform: PlatformInput;
+  precisionPreset: PrecisionPresetId;
   workload: WorkloadInput;
   view: CalculatorViewState;
 };
@@ -61,6 +69,7 @@ function defaultComputeThroughputTflops(modelId: ModelId) {
 
 const defaultState: CalculatorState = {
   modelId: "deepseek-v4-flash",
+  precisionPreset: "custom",
   platform: {
     computeThroughputTflops: defaultComputeThroughputTflops("deepseek-v4-flash"),
     memoryBandwidthGbps: 273,
@@ -69,6 +78,8 @@ const defaultState: CalculatorState = {
     bandwidthEfficiency: 0.6,
     prefillCacheTrafficFactor: 0.1,
     batchSize: 1,
+    chipCount: 1,
+    ...defaultParallelEfficiencies(1),
     runtimeOverheadGb: 4,
     bytesPerWeight: 1,
     bytesPerActivation: 2,
@@ -80,6 +91,7 @@ const defaultState: CalculatorState = {
     tokenRangeStart: 4096,
     tokenRangeEnd: 131072,
     tokenRangeStep: 4096,
+    logarithmicScaleMultiplier: 2,
     tokenSweepMode: "fixed-step"
   },
   view: {
@@ -90,6 +102,45 @@ const defaultState: CalculatorState = {
     showTrendDataPoints: true
   }
 };
+
+const comparisonColors = ["#2563eb", "#f97316", "#22c55e", "#e11d48"];
+
+function nextComparisonColorIndex(profiles: ComparisonProfile[]) {
+  const usedColors = new Set(profiles.map((profile) => profile.color));
+  const availableIndex = comparisonColors.findIndex((color) => !usedColors.has(color));
+  return availableIndex >= 0 ? availableIndex : profiles.length % comparisonColors.length;
+}
+
+function inferPrecision(platform: PlatformInput): PrecisionPresetId {
+  const { bytesPerWeight: w, bytesPerExpert: x, bytesPerActivation: a } = platform;
+  if (w === 0.5 && x === 0.5 && a === 1) return "w4a8";
+  if (w === 1 && x === 1 && a === 1) return "fp8";
+  if (w === 2 && x === 2 && a === 2) return "bf16";
+  return "custom";
+}
+
+function profileLabel(modelId: ModelId, platform: PlatformInput, precision = inferPrecision(platform)) {
+  const modelName = getModelDefinition(modelId).displayName.replace(/^.*\//, "");
+  return `${modelName} (b${platform.batchSize}, n${platform.chipCount}, ${precision === "custom" ? "custom precision" : precision.toUpperCase()})`;
+}
+
+function createProfile(
+  modelId: ModelId,
+  platform: PlatformInput,
+  index: number,
+  selectedPrecision?: PrecisionPresetId
+): ComparisonProfile {
+  const precision = selectedPrecision ?? inferPrecision(platform);
+  return {
+    id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    label: profileLabel(modelId, platform, precision),
+    modelId,
+    platform: { ...platform },
+    precision,
+    color: comparisonColors[index % comparisonColors.length],
+    enabled: true
+  };
+}
 
 function validateState(state: CalculatorState): CalculatorValidation {
   const errors: CalculatorValidation = {};
@@ -106,6 +157,20 @@ function validateState(state: CalculatorState): CalculatorValidation {
   if (state.platform.memoryCapacityGb <= 0) {
     errors.memoryCapacityGb = "需大于 0";
   }
+
+  if (!Number.isInteger(state.platform.chipCount) || state.platform.chipCount < 1) {
+    errors.chipCount = "需为大于或等于 1 的整数";
+  }
+
+  ([
+    "prefillComputeParallelEfficiency",
+    "prefillBandwidthParallelEfficiency",
+    "decodeComputeParallelEfficiency",
+    "decodeBandwidthParallelEfficiency"
+  ] as const).forEach((key) => {
+    const value = state.platform[key];
+    if (!Number.isFinite(value) || value <= 0 || value > 1) errors[key] = "需在 0（不含）到 1 之间";
+  });
 
   if (!Number.isFinite(state.platform.runtimeOverheadGb) || state.platform.runtimeOverheadGb < 0) {
     errors.runtimeOverheadGb = "需为大于或等于 0 的数值";
@@ -147,6 +212,10 @@ function validateState(state: CalculatorState): CalculatorValidation {
 
   if (state.workload.tokenRangeStep <= 0) {
     errors.tokenRangeStep = "Step 需大于 0";
+  }
+
+  if (!Number.isFinite(state.workload.logarithmicScaleMultiplier) || state.workload.logarithmicScaleMultiplier <= 1) {
+    errors.logarithmicScaleMultiplier = "对数刻度倍率需大于 1";
   }
 
   const span = state.workload.tokenRangeEnd - state.workload.tokenRangeStart;
@@ -192,6 +261,16 @@ export function useCalculatorState() {
     );
   });
   const [status, setStatus] = useState<CalculationStatus>("calculated");
+  const [comparisonProfiles, setComparisonProfiles] = useState<ComparisonProfile[]>(() => [
+    createProfile(defaultState.modelId, defaultState.platform, 0)
+  ]);
+  const [comparisonResults, setComparisonResults] = useState<ComparisonResult[]>(() =>
+    calculateComparisonResults(
+      comparisonProfiles,
+      resolveDecodeOutputTokens(defaultState.workload)
+    )
+  );
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
 
   const validationErrors = useMemo(() => validateState(state), [state]);
 
@@ -239,17 +318,16 @@ export function useCalculatorState() {
 
   function updateModelId(modelId: ModelId) {
     const model = getModelDefinition(modelId);
-    setState((current) => ({
-      ...current,
-      modelId,
-      platform: {
+    setState((current) => {
+      const platform = {
         ...current.platform,
         computeThroughputTflops: defaultComputeThroughputTflops(modelId),
         bytesPerWeight: model.recommendedPrecision.bytesPerWeight,
         bytesPerActivation: model.recommendedPrecision.bytesPerActivation,
         bytesPerExpert: model.recommendedPrecision.bytesPerExpert
-      }
-    }));
+      };
+      return { ...current, modelId, platform, precisionPreset: inferPrecision(platform) };
+    });
     setStatus("ready");
   }
 
@@ -292,12 +370,30 @@ export function useCalculatorState() {
   }
 
   function updatePlatform<K extends keyof PlatformInput>(key: K, value: PlatformInput[K]) {
+    setState((current) => {
+      const platform = { ...current.platform, [key]: value };
+      if (key === "chipCount") Object.assign(platform, defaultParallelEfficiencies(Number(value)));
+      return {
+        ...current,
+        precisionPreset: ["bytesPerWeight", "bytesPerExpert", "bytesPerActivation"].includes(key)
+          ? "custom"
+          : current.precisionPreset,
+        platform
+      };
+    });
+    setStatus("ready");
+  }
+
+  function applyPrecisionPreset(preset: Exclude<PrecisionPresetId, "custom">) {
+    const values = preset === "w4a8"
+      ? { bytesPerWeight: 0.5, bytesPerExpert: 0.5, bytesPerActivation: 1 }
+      : preset === "bf16"
+        ? { bytesPerWeight: 2, bytesPerExpert: 2, bytesPerActivation: 2 }
+        : { bytesPerWeight: 1, bytesPerExpert: 1, bytesPerActivation: 1 };
     setState((current) => ({
       ...current,
-      platform: {
-        ...current.platform,
-        [key]: value
-      }
+      precisionPreset: preset,
+      platform: { ...current.platform, ...values }
     }));
     setStatus("ready");
   }
@@ -360,6 +456,10 @@ export function useCalculatorState() {
       platform: { ...defaultState.platform },
       workload: resolvedWorkload
     });
+    const profile = createProfile(defaultState.modelId, defaultState.platform, 0, defaultState.precisionPreset);
+    setComparisonProfiles([profile]);
+    setComparisonResults(calculateComparisonResults([profile], resolvedWorkload));
+    setComparisonError(null);
     setStatus("calculated");
   }
 
@@ -405,6 +505,77 @@ export function useCalculatorState() {
     setStatus("calculated");
   }
 
+  function addComparisonProfile() {
+    setComparisonProfiles((current) => {
+      if (current.length >= 4) return current;
+      return [...current, createProfile(
+        state.modelId,
+        state.platform,
+        nextComparisonColorIndex(current),
+        state.precisionPreset
+      )];
+    });
+  }
+
+  function duplicateComparisonProfile(profileId: string) {
+    setComparisonProfiles((current) => {
+      if (current.length >= 4) return current;
+      const source = current.find((profile) => profile.id === profileId);
+      if (!source) return current;
+      const copy = createProfile(source.modelId, source.platform, nextComparisonColorIndex(current));
+      return [...current, { ...copy, label: `${source.label} copy`, precision: source.precision }];
+    });
+  }
+
+  function deleteComparisonProfile(profileId: string) {
+    setComparisonProfiles((current) => current.filter((profile) => profile.id !== profileId));
+  }
+
+  function toggleComparisonProfile(profileId: string) {
+    setComparisonProfiles((current) => current.map((profile) =>
+      profile.id === profileId ? { ...profile, enabled: !profile.enabled } : profile
+    ));
+  }
+
+  function updateComparisonProfile(
+    profileId: string,
+    field: "batchSize" | "chipCount" | "precision",
+    value: number | PrecisionPresetId
+  ) {
+    setComparisonProfiles((current) => current.map((profile) => {
+      if (profile.id !== profileId) return profile;
+      let platform = { ...profile.platform };
+      let precision = profile.precision;
+      if (field === "batchSize" || field === "chipCount") {
+        platform[field] = Math.max(1, Number(value));
+        if (field === "chipCount") Object.assign(platform, defaultParallelEfficiencies(platform.chipCount));
+      } else {
+        precision = value as PrecisionPresetId;
+        const bytes = precision === "custom"
+          ? null
+          : precision === "w4a8"
+          ? { bytesPerWeight: 0.5, bytesPerExpert: 0.5, bytesPerActivation: 1 }
+          : precision === "bf16"
+            ? { bytesPerWeight: 2, bytesPerExpert: 2, bytesPerActivation: 2 }
+            : { bytesPerWeight: 1, bytesPerExpert: 1, bytesPerActivation: 1 };
+        if (bytes) platform = { ...platform, ...bytes };
+      }
+      return { ...profile, platform, precision, label: profileLabel(profile.modelId, platform, precision) };
+    }));
+  }
+
+  function calculateComparison() {
+    try {
+      setComparisonResults(calculateComparisonResults(
+        comparisonProfiles,
+        resolveDecodeOutputTokens(state.workload)
+      ));
+      setComparisonError(null);
+    } catch (error) {
+      setComparisonError(error instanceof Error ? error.message : "对比计算失败");
+    }
+  }
+
   function clearHistory() {
     setHistoryRecords([]);
     clearStoredHistoryRecords();
@@ -438,6 +609,9 @@ export function useCalculatorState() {
     formulaAvailableModels,
     formulaResult,
     calculationRevision,
+    comparisonProfiles,
+    comparisonResults,
+    comparisonError,
     validationErrors,
     updateModelFamily,
     updateModelId,
@@ -446,11 +620,18 @@ export function useCalculatorState() {
     updateFormulaModelFamily,
     updateFormulaModelId,
     updatePlatform,
+    applyPrecisionPreset,
     updateWorkload,
     updateView,
     applyQuickRange,
     reset,
     calculate,
+    addComparisonProfile,
+    duplicateComparisonProfile,
+    deleteComparisonProfile,
+    toggleComparisonProfile,
+    updateComparisonProfile,
+    calculateComparison,
     clearHistory,
     deleteHistoryRecord
   };

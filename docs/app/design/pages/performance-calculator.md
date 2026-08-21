@@ -1,5 +1,19 @@
 # Performance Calculator Page Spec
 
+## Multi-profile performance dashboard (2026-08-21)
+
+- Platform throughput, memory bandwidth and capacity fields are explicitly labelled per chip. Capacity scales linearly with `N Chip`; Prefill/Decode compute and bandwidth use separate `NChip × parallel efficiency` factors. `N Chip = 1` forces all parallel efficiencies to 100% and preserves single-chip results.
+- 平台参数区提供可折叠的“多芯片扩展效率”，默认表为 n2=`72/78/65/70%`、n4=`58/64/48/52%`（Prefill Compute/Bandwidth、Decode Compute/Bandwidth），并允许用户校准。图表 tooltip、对比明细、公式追踪和 HTML 报告均展示实际资源倍率。
+- Memory Usage 提供“总显存需求”和“单卡显存压力”两种独立口径。单卡压力采用简化分片假设：Weight÷NChip、KV/State 不分片、Temp÷min(NChip,2)、Runtime Overhead 每卡一份；组成项筛选独立支持全部、Weight、KV/State Cache、Temp 和 Runtime Overhead。整机容量按 `memoryCapacityGb/chip × NChip` 判断。
+- Memory Usage 与 Prefill/Decode 共用 X 轴类型：线性模式消费固定步长显存序列，对数模式消费按 `Log Scale Multiplier` 独立计算的倍增序列，柱形、刻度标签和 Tooltip 必须同步切换。
+- Precision preset buttons only write the existing bytes fields and do not imply kernel-efficiency equivalence.
+- Users can save, copy, delete, enable and disable up to four independent comparison profiles. Saved profiles expose Batch, N Chip and Precision edits and do not follow later changes to current inputs.
+- “开始对比” independently evaluates each enabled profile over the shared Token Sweep. A context-limit failure identifies the offending profile.
+- Prefill Speed and Decode Speed are side-by-side multi-series charts on wide screens. Memory Usage spans the row and supports total, weight-only and cache-only modes. All three charts stack vertically on narrow screens.
+- The two speed charts share one profile legend. Memory `全部` mode uses grouped stacked bars: each profile owns one bar per sweep point, with Weight, persistent KV/State, temporary workspace and runtime overhead rendered as same-color opacity layers. The memory axis and tooltip use MB.
+- Decode chart values are initial single-step TPS even when Decode Output Tokens is zero; Average Decode TPS in the single-result summary remains zero.
+- The original single-configuration result, formula trace, JSON export and HTML report remain unchanged in purpose.
+
 > Quick token inputs provide `4K`, `8K`, `32K`, `64K`, `128K`, and `1M`. Clicking a supported target input switches the destination of these shortcuts; values above the selected model context limit remain disabled except when editing the sweep step.
 
 > Dense Sliding Attention core uses `4 × S × Lkv × heads × head_dim`, covering both `QKᵀ` and `AV`. Dense Full Attention retains the causal-equivalent form `2 × S² × heads × head_dim`, which already equals `4 × (S²/2) × heads × head_dim` and must not be doubled again.
@@ -383,7 +397,8 @@ Prefill/Decode 对比表宽度不足时允许容器内部横向滚动，禁止�
 
 - `Token Sweep Start`
 - `Token Sweep End`
-- `Token Sweep Step`
+- `Linear Chart Step`：仅控制线性图的数据点步长
+- `Log Scale Multiplier`：控制对数图相邻刻度倍率，默认 `×2`，取值必须大于 `1`
 
 快捷按钮：
 
@@ -619,7 +634,7 @@ Tooltip 必须显示：
 
 模型摘要中的 `Context` 来自模型配置声明的最大上下文窗口（`max_position_embeddings` 或 `text_config.max_position_embeddings`），不得使用性能验收场景长度代替。`Prompt Token Length` 默认值 `131072`（128K）是验收计算长度，输入项下方应明确注明它不是模型最大上下文窗口。
 
-输入长度快捷值必须受当前模型 `contextLimit` 约束：超过最大上下文的快捷按钮禁用，状态更新函数同时拒绝越界值；手动输入的 Prompt 长度和趋势扫描起点、终点也必须进行相同校验。`Token Sweep Start`、`Token Sweep End`、`Token Sweep Step` 三项归入独立的“Token趋势图扫描”小节。
+输入长度快捷值必须受当前模型 `contextLimit` 约束：超过最大上下文的快捷按钮禁用，状态更新函数同时拒绝越界值；手动输入的 Prompt 长度和趋势扫描起点、终点也必须进行相同校验。`Token Sweep Start`、`Token Sweep End`、`Linear Chart Step`、`Log Scale Multiplier` 四项归入独立的“Token趋势图扫描”小节。线性步长与对数刻度倍率分别控制两种横轴展示，不能共用同一个步长含义。
 
 快捷输入区位于输入长度板块最下方，标题为“快捷输入”。用户先聚焦 `Prompt Token Length`、`Decode Output Tokens` 或任一 Token Sweep 输入框，再点击 `4K / 8K / 32K / 128K / 1M`，快捷值写入当前聚焦的目标字段；界面同时显示当前输入目标。
 

@@ -6,5 +6,6 @@ export type WorkloadInput = {
   tokenRangeStart: number;
   tokenRangeEnd: number;
   tokenRangeStep: number;
+  logarithmicScaleMultiplier: number;
   tokenSweepMode: TokenSweepMode;
 };

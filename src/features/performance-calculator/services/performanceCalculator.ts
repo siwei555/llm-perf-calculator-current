@@ -10,6 +10,7 @@ import type {
 } from "../../../domain/performance/types";
 import type { PlatformInput } from "../../../domain/platform/types";
 import type { WorkloadInput } from "../../../domain/workload/types";
+import { getResourceScaling, getTotalMemoryCapacityGb } from "./platformScaling";
 
 type LayerBreakdown = {
   q: number;
@@ -771,19 +772,19 @@ function computeDenseFullResult(
 
   const overheadGb = platform.runtimeOverheadGb;
   const totalRuntimeMemoryGb = weightGb + cacheGb + tmpPeakGb + overheadGb;
-  const memoryFitsCapacity = totalRuntimeMemoryGb <= platform.memoryCapacityGb;
+  const memoryFitsCapacity = totalRuntimeMemoryGb <= getTotalMemoryCapacityGb(platform);
 
   // ---- TPS ----
-  const effectiveCompute = toFlops(platform.computeThroughputTflops * platform.computeEfficiency);
-  const effectiveBandwidth = gbpsToBytesPerSecond(
-    platform.memoryBandwidthGbps * platform.bandwidthEfficiency
+  const prefillEffectiveCompute = toFlops(platform.computeThroughputTflops * platform.computeEfficiency * getResourceScaling(platform, "prefill", "compute"));
+  const prefillEffectiveBandwidth = gbpsToBytesPerSecond(
+    platform.memoryBandwidthGbps * platform.bandwidthEfficiency * getResourceScaling(platform, "prefill", "bandwidth")
   );
 
-  const prefillComputeTps = (effectiveCompute * S) / prefillFlops;
+  const prefillComputeTps = (prefillEffectiveCompute * S) / prefillFlops;
   const prefillTrafficBytes =
     weightGb * 1_000_000_000 +
     cacheGb * 1_000_000_000 * platform.prefillCacheTrafficFactor;
-  const prefillBandwidthTps = (effectiveBandwidth * S) / prefillTrafficBytes;
+  const prefillBandwidthTps = (prefillEffectiveBandwidth * S) / prefillTrafficBytes;
 
   const decodeSlidingBytesPerToken = denseCacheBytesPerLayer(model, B, decodeSlidingLkv, nKvSliding, cSliding, e);
   const decodeFullBytesPerToken = denseCacheBytesPerLayer(model, B, decodeFullLkv, nKvFull, cFull, e);
@@ -807,8 +808,8 @@ function computeDenseFullResult(
       decodeFullLkv
     );
 
-  const decodeComputeTps = effectiveCompute / decodeComputeFlopsPerToken;
-  const decodeBandwidthTps = effectiveBandwidth / decodeBytes;
+  const decodeComputeTps = toFlops(platform.computeThroughputTflops * platform.computeEfficiency * getResourceScaling(platform, "decode", "compute")) / decodeComputeFlopsPerToken;
+  const decodeBandwidthTps = gbpsToBytesPerSecond(platform.memoryBandwidthGbps * platform.bandwidthEfficiency * getResourceScaling(platform, "decode", "bandwidth")) / decodeBytes;
 
   const prefillTps = Math.min(prefillComputeTps, prefillBandwidthTps);
   const decodeTps = Math.min(decodeComputeTps, decodeBandwidthTps);
@@ -942,17 +943,17 @@ function computeFullResult(
   );
   const overheadGb = platform.runtimeOverheadGb;
   const totalRuntimeMemoryGb = weightGb + cacheGb + tmpPeakGb + overheadGb;
-  const memoryFitsCapacity = totalRuntimeMemoryGb <= platform.memoryCapacityGb;
-  const effectiveCompute = toFlops(platform.computeThroughputTflops * platform.computeEfficiency);
-  const effectiveBandwidth = gbpsToBytesPerSecond(
-    platform.memoryBandwidthGbps * platform.bandwidthEfficiency
+  const memoryFitsCapacity = totalRuntimeMemoryGb <= getTotalMemoryCapacityGb(platform);
+  const prefillEffectiveCompute = toFlops(platform.computeThroughputTflops * platform.computeEfficiency * getResourceScaling(platform, "prefill", "compute"));
+  const prefillEffectiveBandwidth = gbpsToBytesPerSecond(
+    platform.memoryBandwidthGbps * platform.bandwidthEfficiency * getResourceScaling(platform, "prefill", "bandwidth")
   );
-  const prefillComputeTps = (effectiveCompute * sequenceLength) / prefillFlops;
+  const prefillComputeTps = (prefillEffectiveCompute * sequenceLength) / prefillFlops;
   const prefillTrafficBytes =
     (weightGb * 1_000_000_000 +
       cacheGb * 1_000_000_000 * platform.prefillCacheTrafficFactor) *
     platform.batchSize;
-  const prefillBandwidthTps = (effectiveBandwidth * sequenceLength) / prefillTrafficBytes;
+  const prefillBandwidthTps = (prefillEffectiveBandwidth * sequenceLength) / prefillTrafficBytes;
   const decodeSlidingLkv = model.slidingWindow;
   const decodeCsaVisibleLength = decodeCsaLkv(model, workload.prefillTokenLength);
   const decodeHcaVisibleLength = decodeHcaLkv(model, workload.prefillTokenLength);
@@ -994,8 +995,8 @@ function computeFullResult(
     model,
     workload.prefillTokenLength
   ).total;
-  const decodeComputeTps = effectiveCompute / decodeComputeFlopsPerToken;
-  const decodeBandwidthTps = effectiveBandwidth / decodeBytes;
+  const decodeComputeTps = toFlops(platform.computeThroughputTflops * platform.computeEfficiency * getResourceScaling(platform, "decode", "compute")) / decodeComputeFlopsPerToken;
+  const decodeBandwidthTps = gbpsToBytesPerSecond(platform.memoryBandwidthGbps * platform.bandwidthEfficiency * getResourceScaling(platform, "decode", "bandwidth")) / decodeBytes;
   const prefillTps = Math.min(prefillComputeTps, prefillBandwidthTps);
   const decodeTps = Math.min(decodeComputeTps, decodeBandwidthTps);
   const ttftMs = (sequenceLength / Math.max(prefillTps, 1e-6)) * 1000;
@@ -1893,6 +1894,30 @@ function buildFormulaTrace(
   ];
 }
 
+function buildPlatformScalingTrace(platform: PlatformInput): FormulaTraceSection[] {
+  const variables = [
+    "C_chip、BW_chip 为单芯片峰值算力和带宽，来自平台参数输入。",
+    "NChip 为芯片数量；η_compute、η_bandwidth 为单芯片利用率。",
+    "η_parallel_* 为多芯片并行扩展效率，来自默认经验表或用户输入。"
+  ];
+  return [
+    {
+      category: "prefill",
+      rows: [
+        { label: "Prefill effective compute", expression: "C_chip × NChip × η_compute × η_parallel_prefill_compute", explanation: variables, evaluated: `${getResourceScaling(platform, "prefill", "compute").toFixed(3)}× single-chip peak before utilization` },
+        { label: "Prefill effective bandwidth", expression: "BW_chip × NChip × η_bandwidth × η_parallel_prefill_bandwidth", explanation: variables, evaluated: `${getResourceScaling(platform, "prefill", "bandwidth").toFixed(3)}× single-chip peak before utilization` }
+      ]
+    },
+    {
+      category: "decode",
+      rows: [
+        { label: "Decode effective compute", expression: "C_chip × NChip × η_compute × η_parallel_decode_compute", explanation: variables, evaluated: `${getResourceScaling(platform, "decode", "compute").toFixed(3)}× single-chip peak before utilization` },
+        { label: "Decode effective bandwidth", expression: "BW_chip × NChip × η_bandwidth × η_parallel_decode_bandwidth", explanation: variables, evaluated: `${getResourceScaling(platform, "decode", "bandwidth").toFixed(3)}× single-chip peak before utilization` }
+      ]
+    }
+  ];
+}
+
 // ─────────────────────────────────────────────────────────────
 // Hybrid Linear-MoE helpers (Qwen3.5 Gated DeltaNet + Full GQA)
 // ─────────────────────────────────────────────────────────────
@@ -2000,19 +2025,19 @@ function computeHybridLinearMoeResult(
 
   const overheadGb = platform.runtimeOverheadGb;
   const totalRuntimeMemoryGb = weightGb + cacheGb + tmpPeakGb + overheadGb;
-  const memoryFitsCapacity = totalRuntimeMemoryGb <= platform.memoryCapacityGb;
+  const memoryFitsCapacity = totalRuntimeMemoryGb <= getTotalMemoryCapacityGb(platform);
 
   // ── TPS ──
-  const effectiveCompute = toFlops(platform.computeThroughputTflops * platform.computeEfficiency);
-  const effectiveBandwidth = gbpsToBytesPerSecond(
-    platform.memoryBandwidthGbps * platform.bandwidthEfficiency
+  const prefillEffectiveCompute = toFlops(platform.computeThroughputTflops * platform.computeEfficiency * getResourceScaling(platform, "prefill", "compute"));
+  const prefillEffectiveBandwidth = gbpsToBytesPerSecond(
+    platform.memoryBandwidthGbps * platform.bandwidthEfficiency * getResourceScaling(platform, "prefill", "bandwidth")
   );
 
-  const prefillComputeTps = (effectiveCompute * S) / prefillFlops;
+  const prefillComputeTps = (prefillEffectiveCompute * S) / prefillFlops;
   const prefillTrafficBytes =
     (weightGb * 1_000_000_000 +
       cacheGb * 1_000_000_000 * platform.prefillCacheTrafficFactor) * B;
-  const prefillBandwidthTps = (effectiveBandwidth * S) / prefillTrafficBytes;
+  const prefillBandwidthTps = (prefillEffectiveBandwidth * S) / prefillTrafficBytes;
 
   // ── Decode FLOPs (single token) ──
   const decodeFullQGate = 2 * D * (2 * n_h * c);
@@ -2036,7 +2061,7 @@ function computeHybridLinearMoeResult(
   const decodeComputeFlopsPerToken =
     fullLayers * decodeFullPerLayer + linearLayers * decodeLinPerLayer;
 
-  const decodeComputeTps = effectiveCompute / decodeComputeFlopsPerToken;
+  const decodeComputeTps = toFlops(platform.computeThroughputTflops * platform.computeEfficiency * getResourceScaling(platform, "decode", "compute")) / decodeComputeFlopsPerToken;
 
   // ── Decode traffic bytes per token ──
   const decodeFullBytesPerLayer = B * 2 * n_kv * S_ctx * c * e;    // read K+V
@@ -2055,7 +2080,7 @@ function computeHybridLinearMoeResult(
     expertB * 1_000_000_000 * activeExpertFraction * platform.bytesPerExpert;
 
   const decodeBytes = activeDecodeWeightBytes + decodeCacheTrafficBytes;
-  const decodeBandwidthTps = effectiveBandwidth / decodeBytes;
+  const decodeBandwidthTps = gbpsToBytesPerSecond(platform.memoryBandwidthGbps * platform.bandwidthEfficiency * getResourceScaling(platform, "decode", "bandwidth")) / decodeBytes;
 
   const prefillTps = Math.min(prefillComputeTps, prefillBandwidthTps);
   const decodeTps = Math.min(decodeComputeTps, decodeBandwidthTps);
@@ -2356,7 +2381,7 @@ function buildHybridFormulaTrace(
   ];
 }
 
-export function calculatePerformanceResult(
+function calculatePerformanceResultForEffectivePlatform(
   model: ModelDefinition,
   platform: PlatformInput,
   workload: WorkloadInput
@@ -2377,24 +2402,50 @@ export function calculatePerformanceResult(
   }
 
   const tokenSweepSeries: TokenSweepPoint[] = [];
+  const logarithmicTokenSweepSeries: TokenSweepPoint[] = [];
   const projectionSeries: PerformanceProjectionPoint[] = [];
+
+  const calculateSweepPoint = (tokenLength: number): TokenSweepPoint => {
+    const sweepWorkload = { ...workload, prefillTokenLength: tokenLength };
+    const pointResult = computeFn(model, platform, sweepWorkload, tokenLength);
+    return {
+      tokenLength,
+      prefillTps: pointResult.prefillTps,
+      decodeTps: pointResult.decodeTps,
+      ttftMs: pointResult.ttftMs,
+      totalRuntimeMemoryGb: pointResult.totalRuntimeMemoryGb,
+      weightsGb: pointResult.weightGb,
+      persistentCacheGb: pointResult.cacheGb,
+      temporaryMemoryGb: pointResult.tmpPeakGb,
+      runtimeOverheadGb: pointResult.overheadGb,
+      prefillBottleneck: pointResult.prefillBottleneck,
+      decodeBottleneck: pointResult.decodeBottleneck
+    };
+  };
 
   for (
     let tokenLength = workload.tokenRangeStart;
     tokenLength <= workload.tokenRangeEnd;
     tokenLength += workload.tokenRangeStep
   ) {
-    const sweepWorkload = { ...workload, prefillTokenLength: tokenLength };
-    const pointResult = computeFn(model, platform, sweepWorkload, tokenLength);
-    tokenSweepSeries.push({
-      tokenLength,
-      prefillTps: pointResult.prefillTps,
-      decodeTps: pointResult.decodeTps,
-      ttftMs: pointResult.ttftMs,
-      totalRuntimeMemoryGb: pointResult.totalRuntimeMemoryGb,
-      prefillBottleneck: pointResult.prefillBottleneck,
-      decodeBottleneck: pointResult.decodeBottleneck
-    });
+    tokenSweepSeries.push(calculateSweepPoint(tokenLength));
+  }
+
+  const logMultiplier = workload.logarithmicScaleMultiplier > 1
+    ? workload.logarithmicScaleMultiplier
+    : 2;
+  const logStart = Math.max(1, workload.tokenRangeStart);
+  for (let tokenLength = logStart; tokenLength <= workload.tokenRangeEnd;) {
+    logarithmicTokenSweepSeries.push(calculateSweepPoint(tokenLength));
+    if (tokenLength > workload.tokenRangeEnd / logMultiplier) break;
+    const nextTokenLength = Math.max(tokenLength + 1, Math.round(tokenLength * logMultiplier));
+    tokenLength = nextTokenLength;
+  }
+  if (
+    workload.tokenRangeEnd > 0 &&
+    logarithmicTokenSweepSeries[logarithmicTokenSweepSeries.length - 1]?.tokenLength !== workload.tokenRangeEnd
+  ) {
+    logarithmicTokenSweepSeries.push(calculateSweepPoint(workload.tokenRangeEnd));
   }
 
   const standardProjectionContexts = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072]
@@ -2461,7 +2512,10 @@ export function calculatePerformanceResult(
     activeResult
   );
   const peakResult = decodeGeneration.peakResult;
-  const formulaTrace = buildFormulaTrace(model, platform, workload, activeResult);
+  const formulaTrace = [
+    ...buildPlatformScalingTrace(platform),
+    ...buildFormulaTrace(model, platform, workload, activeResult)
+  ];
   const peakMemoryTrace = buildFormulaTrace(
     model,
     platform,
@@ -2554,6 +2608,21 @@ export function calculatePerformanceResult(
     ),
     formulaTrace,
     tokenSweepSeries,
+    logarithmicTokenSweepSeries,
     projectionSeries
   };
+}
+
+export function calculatePerformanceResult(
+  model: ModelDefinition,
+  platform: PlatformInput,
+  workload: WorkloadInput
+): PerformanceResult {
+  const chipCount = Math.max(1, platform.chipCount || 1);
+  const effectivePlatform: PlatformInput = {
+    ...platform,
+    chipCount
+  };
+
+  return calculatePerformanceResultForEffectivePlatform(model, effectivePlatform, workload);
 }

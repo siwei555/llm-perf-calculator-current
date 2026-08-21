@@ -8,6 +8,8 @@ import type {
   CalculatorViewState,
   QuickRangeTarget
 } from "../state/useCalculatorState";
+import type { PrecisionPresetId } from "../types/comparison";
+import { defaultParallelEfficiencies } from "../services/platformScaling";
 
 type Props = {
   modelId: ModelId;
@@ -22,6 +24,7 @@ type Props = {
   onModelFamilyChange: (family: string) => void;
   onModelIdChange: (modelId: ModelId) => void;
   onPlatformChange: <K extends keyof PlatformInput>(key: K, value: PlatformInput[K]) => void;
+  onPrecisionPresetChange: (preset: Exclude<PrecisionPresetId, "custom">) => void;
   onWorkloadChange: <K extends keyof WorkloadInput>(key: K, value: WorkloadInput[K]) => void;
   onViewChange: <K extends keyof CalculatorViewState>(
     key: K,
@@ -67,6 +70,7 @@ export function CalculatorControls({
   onModelFamilyChange,
   onModelIdChange,
   onPlatformChange,
+  onPrecisionPresetChange,
   onWorkloadChange,
   onViewChange,
   onQuickRange
@@ -205,7 +209,7 @@ export function CalculatorControls({
               <FieldError message={validationErrors.tokenRangeEnd} />
             </label>
             <label className="field">
-              <span>Token Sweep Step</span>
+              <span>Linear Chart Step</span>
               <input
                 type="number"
                 value={workload.tokenRangeStep}
@@ -214,7 +218,22 @@ export function CalculatorControls({
                   onWorkloadChange("tokenRangeStep", numberValue(event.target.value))
                 }
               />
+              <small>仅控制线性图的数据点步长</small>
               <FieldError message={validationErrors.tokenRangeStep} />
+            </label>
+            <label className="field">
+              <span>Log Scale Multiplier</span>
+              <input
+                type="number"
+                min="1.01"
+                step="0.1"
+                value={workload.logarithmicScaleMultiplier ?? 2}
+                onChange={(event) =>
+                  onWorkloadChange("logarithmicScaleMultiplier", numberValue(event.target.value))
+                }
+              />
+              <small>控制对数图相邻刻度倍率，默认 ×2</small>
+              <FieldError message={validationErrors.logarithmicScaleMultiplier} />
             </label>
           </div>
           <div className="quick-input-heading">
@@ -252,9 +271,16 @@ export function CalculatorControls({
 
         <article id="performance-platform" className="panel page-section-anchor">
           <h3>平台参数</h3>
+          <div className="precision-presets" aria-label="Precision presets">
+            <span>Precision Preset</span>
+            <button type="button" onClick={() => onPrecisionPresetChange("w4a8")}>W4A8</button>
+            <button type="button" onClick={() => onPrecisionPresetChange("w8a8")}>W8A8</button>
+            <button type="button" onClick={() => onPrecisionPresetChange("fp8")}>FP8</button>
+            <button type="button" onClick={() => onPrecisionPresetChange("bf16")}>BF16</button>
+          </div>
           <div className="form-grid">
             <label className="field">
-              <span>Compute Throughput (TFLOPS)</span>
+              <span>Compute Throughput (TFLOPS / chip)</span>
               <input
                 type="number"
                 value={platform.computeThroughputTflops}
@@ -266,7 +292,7 @@ export function CalculatorControls({
               <FieldError message={validationErrors.computeThroughputTflops} />
             </label>
             <label className="field">
-              <span>Memory Bandwidth (GB/s)</span>
+              <span>Memory Bandwidth (GB/s / chip)</span>
               <input
                 type="number"
                 step="1"
@@ -278,7 +304,7 @@ export function CalculatorControls({
               <FieldError message={validationErrors.memoryBandwidthGbps} />
             </label>
             <label className="field">
-              <span>HBM / VRAM Capacity (GB)</span>
+              <span>HBM / VRAM Capacity (GB / chip)</span>
               <input
                 type="number"
                 value={platform.memoryCapacityGb}
@@ -287,6 +313,18 @@ export function CalculatorControls({
                 }
               />
               <FieldError message={validationErrors.memoryCapacityGb} />
+            </label>
+            <label className="field">
+              <span>N Chip</span>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={platform.chipCount}
+                onChange={(event) => onPlatformChange("chipCount", numberValue(event.target.value))}
+              />
+              <small>多芯片性能按 NChip × 并行效率估算，不按芯片数线性放大。</small>
+              <FieldError message={validationErrors.chipCount} />
             </label>
             <label className="field">
               <span>Bytes / Weight</span>
@@ -331,6 +369,42 @@ export function CalculatorControls({
               <small>0.5=FP4, 1=FP8</small>
             </label>
           </div>
+          <details className="platform-scaling-details" open={platform.chipCount > 1}>
+            <summary>
+              多芯片扩展效率
+              {platform.chipCount > 1 && ([
+                "prefillComputeParallelEfficiency",
+                "prefillBandwidthParallelEfficiency",
+                "decodeComputeParallelEfficiency",
+                "decodeBandwidthParallelEfficiency"
+              ] as const).some((key) => Math.abs(platform[key] - defaultParallelEfficiencies(platform.chipCount)[key]) > 1e-9)
+                ? <small>custom scaling</small>
+                : null}
+            </summary>
+            <div className="form-grid">
+              {([
+                ["prefillComputeParallelEfficiency", "Prefill Compute Scaling"],
+                ["prefillBandwidthParallelEfficiency", "Prefill Bandwidth Scaling"],
+                ["decodeComputeParallelEfficiency", "Decode Compute Scaling"],
+                ["decodeBandwidthParallelEfficiency", "Decode Bandwidth Scaling"]
+              ] as const).map(([key, label]) => (
+                <label className="field" key={key}>
+                  <span>{label} (%)</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    step="1"
+                    disabled={platform.chipCount <= 1}
+                    value={Math.round(platform[key] * 10000) / 100}
+                    onChange={(event) => onPlatformChange(key, numberValue(event.target.value) / 100)}
+                  />
+                  <small>实际资源倍率：{(platform.chipCount * (platform.chipCount <= 1 ? 1 : platform[key])).toFixed(2)}×</small>
+                  <FieldError message={validationErrors[key]} />
+                </label>
+              ))}
+            </div>
+          </details>
         </article>
 
         <article id="performance-assumptions" className="panel page-section-anchor">

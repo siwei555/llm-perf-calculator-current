@@ -6,6 +6,9 @@ import { IntermediateMetricsTable } from "../../features/performance-calculator/
 import { MemoryBreakdownCard } from "../../features/performance-calculator/components/MemoryBreakdownCard";
 import { MetricCards } from "../../features/performance-calculator/components/MetricCards";
 import { TrendChart } from "../../features/performance-calculator/components/TrendChart";
+import { ComparisonProfilesPanel } from "../../features/performance-calculator/components/ComparisonProfilesPanel";
+import { PerformanceDashboardCharts } from "../../features/performance-calculator/components/PerformanceDashboardCharts";
+import { ComparisonDetailTable } from "../../features/performance-calculator/components/ComparisonDetailTable";
 import { useCalculatorContext } from "../../features/performance-calculator/state/CalculatorProvider";
 import { getModelDefinition } from "../../engines/model-registry";
 
@@ -22,14 +25,24 @@ export function PerformanceCalculatorPage() {
     availableFamilies,
     availableModels,
     validationErrors,
+    comparisonProfiles,
+    comparisonResults,
+    comparisonError,
     updateModelFamily,
     updateModelId,
     updatePlatform,
+    applyPrecisionPreset,
     updateWorkload,
     updateView,
     applyQuickRange,
     reset,
-    calculate
+    calculate,
+    addComparisonProfile,
+    duplicateComparisonProfile,
+    deleteComparisonProfile,
+    toggleComparisonProfile,
+    updateComparisonProfile,
+    calculateComparison
   } = useCalculatorContext();
   const calculatedModel = useMemo(
     () => getModelDefinition(calculationSnapshot.modelId),
@@ -162,9 +175,21 @@ export function PerformanceCalculatorPage() {
         onModelFamilyChange={updateModelFamily}
         onModelIdChange={updateModelId}
         onPlatformChange={updatePlatform}
+        onPrecisionPresetChange={applyPrecisionPreset}
         onWorkloadChange={updateWorkload}
         onViewChange={updateView}
         onQuickRange={applyQuickRange}
+      />
+
+      <ComparisonProfilesPanel
+        profiles={comparisonProfiles}
+        onAdd={addComparisonProfile}
+        onDuplicate={duplicateComparisonProfile}
+        onDelete={deleteComparisonProfile}
+        onToggle={toggleComparisonProfile}
+        onUpdate={updateComparisonProfile}
+        onCalculate={calculateComparison}
+        error={comparisonError}
       />
 
       <div id="performance-overview" className="performance-primary-results page-section-anchor">
@@ -283,6 +308,12 @@ export function PerformanceCalculatorPage() {
           }
           />
         </div>
+
+        <div id="performance-dashboard" className="page-section-anchor">
+          <PerformanceDashboardCharts results={comparisonResults} />
+        </div>
+
+        <ComparisonDetailTable results={comparisonResults} />
 
         {state.view.showFormulaTrace ? (
           <div id="performance-formula-trace" className="page-section-anchor">

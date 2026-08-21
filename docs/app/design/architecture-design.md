@@ -19,6 +19,15 @@
 - `Runtime Memory`
 - token 长度变化趋势
 - 模型结构和公式追溯
+- 最多四组模型/平台快照的性能看板对比
+
+## Performance dashboard design (2026-08-21)
+
+- `PlatformInput.chipCount` defaults to 1. Throughput, bandwidth and capacity inputs are per-chip values. Capacity derives linearly, while compute and bandwidth are phase-specific resources derived through `getResourceScaling(platform, phase, resource)` and four user-adjustable parallel-efficiency fields. Formula strategies consume the original per-chip platform snapshot and must not pre-multiply it at the calculation boundary.
+- Precision labels are UI presets only. W4A8 maps to `0.5/0.5/1`, W8A8 and FP8 map to `1/1/1`, and BF16 maps to `2/2/2` for weight/expert/activation bytes.
+- Saved `ComparisonProfile` objects contain independent model and platform snapshots. Current calculator inputs never mutate a saved profile.
+- `calculateComparisonResults` orchestrates the existing `calculatePerformanceResult`; chart components never evaluate model formulas.
+- Comparison output wraps the existing token sweep with an additional memory sweep projection for weights, persistent cache/state, temporary memory, overhead and total memory.
 
 首版支持 `DeepSeek V4` 家族，并已扩展接入 `Gemma 4`、`Qwen3.5` 和 `Qwen3.6` family。Qwen3.6 当前包含 `Qwen/Qwen3.6-35B-A3B` 与其官方 FP8 版本，两者复用 `hybrid-linear-moe` 策略，并通过模型级推荐精度区分默认权重显存口径。
 
